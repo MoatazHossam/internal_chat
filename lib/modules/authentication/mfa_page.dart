@@ -1,0 +1,2 @@
+import 'package:flutter/material.dart'; import 'package:get/get.dart'; import 'authentication_controller.dart';
+class MfaPage extends GetView<AuthenticationController>{const MfaPage({super.key});@override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Verify sign-in')),body:const Padding(padding:EdgeInsets.all(24),child:Text('Enter the verification code provided by the approved MFA channel.')));}

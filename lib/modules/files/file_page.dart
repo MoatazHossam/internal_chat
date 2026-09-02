@@ -1,0 +1,1 @@
+import 'package:flutter/material.dart';import 'package:get/get.dart';import 'file_controller.dart';class FilePage extends GetView<FileController>{const FilePage({super.key});@override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Attachments')),body:Obx(()=>ListView(children:controller.uploads.map((f)=>ListTile(title:Text(f.name))).toList())));}

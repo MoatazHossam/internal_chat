@@ -1,0 +1,1 @@
+class AppConfiguration { const AppConfiguration({required this.apiBaseUrl}); final Uri apiBaseUrl; static AppConfiguration fromEnvironment()=>AppConfiguration(apiBaseUrl: Uri.parse(const String.fromEnvironment('API_BASE_URL', defaultValue:'http://localhost'))); }

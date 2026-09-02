@@ -1,0 +1,1 @@
+import 'package:flutter/material.dart';abstract final class AppTheme{static ThemeData get light=>ThemeData(colorScheme:ColorScheme.fromSeed(seedColor:const Color(0xff075e54)),useMaterial3:true,appBarTheme:const AppBarTheme(backgroundColor:Color(0xff075e54),foregroundColor:Colors.white));}
