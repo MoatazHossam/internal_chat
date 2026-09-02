@@ -7,14 +7,22 @@ abstract interface class ChatRepository {
   Stream<ChatMessage> get incomingMessages;
   Future<void> initialize();
   Future<void> dispose();
-  Future<ApiResult<PageResult<Conversation>>> conversations(PageRequest request);
+
+  Future<ApiResult<PageResult<Conversation>>> conversations(
+    PageRequest request,
+  );
+
   Future<ApiResult<PageResult<ChatMessage>>> messages(
     String conversationId,
     PageRequest request,
   );
+
   Future<ApiResult<ChatMessage>> sendMessage({
     required String conversationId,
     required String body,
     required String clientId,
+    String? replyToId,
+    String? replyToSenderName,
+    String? replyToBody,
   });
 }

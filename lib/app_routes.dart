@@ -1,1 +1,8 @@
-abstract final class AppRoutes{static const login='/login';static const mfa='/mfa';static const conversations='/conversations';static const conversation='/conversations/:id';static const files='/files';}
+abstract final class AppRoutes {
+  static const login = '/login';
+  static const mfa = '/mfa';
+  static const conversations = '/conversations';
+  static const conversation = '/conversations/:id';
+  static const files = '/files';
+  static const settings = '/settings';
+}
