@@ -1,0 +1,1 @@
+import 'package:get/get.dart';import '../app_routes.dart';import 'contracts.dart';class SessionManager{SessionManager(this.tokens);final TokenStorageService tokens;Future<void> unauthorized()async{await tokens.clear();if(Get.currentRoute!=AppRoutes.login)Get.offAllNamed(AppRoutes.login);}}
