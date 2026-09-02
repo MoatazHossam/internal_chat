@@ -1,1 +1,54 @@
-import 'package:flutter/material.dart';import 'package:get/get.dart';import 'file_controller.dart';class FilePage extends GetView<FileController>{const FilePage({super.key});@override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Attachments')),body:Obx(()=>ListView(children:controller.uploads.map((f)=>ListTile(title:Text(f.name))).toList())));}
+import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+
+import 'file_controller.dart';
+
+class FilePage extends GetView<FileController> {
+  const FilePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Attachments')),
+      body: Obx(
+        () => controller.uploads.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.attach_file,
+                      size: 64,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withValues(alpha: 0.3),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'No attachments yet',
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withValues(alpha: 0.5),
+                          ),
+                    ),
+                  ],
+                ),
+              )
+            : ListView.builder(
+                itemCount: controller.uploads.length,
+                itemBuilder: (context, index) {
+                  final file = controller.uploads[index];
+                  return ListTile(
+                    leading: const Icon(Icons.insert_drive_file_outlined),
+                    title: Text(file.name),
+                    subtitle: Text(file.id),
+                  );
+                },
+              ),
+      ),
+    );
+  }
+}
