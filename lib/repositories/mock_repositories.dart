@@ -438,6 +438,10 @@ class MockChatRepository implements ChatRepository {
     String? replyToId,
     String? replyToSenderName,
     String? replyToBody,
+    String? attachmentName,
+    String? attachmentMimeType,
+    int? attachmentDurationMs,
+    String? attachmentLocalPath,
   }) async {
     final pending = ChatMessage(
       id: clientId,
@@ -450,6 +454,10 @@ class MockChatRepository implements ChatRepository {
       replyToId: replyToId,
       replyToSenderName: replyToSenderName,
       replyToBody: replyToBody,
+      attachmentName: attachmentName,
+      attachmentMimeType: attachmentMimeType,
+      attachmentDurationMs: attachmentDurationMs,
+      attachmentLocalPath: attachmentLocalPath,
     );
 
     final isOnline = await _connectivity.isOnline;
@@ -469,6 +477,10 @@ class MockChatRepository implements ChatRepository {
       replyToId: replyToId,
       replyToSenderName: replyToSenderName,
       replyToBody: replyToBody,
+      attachmentName: attachmentName,
+      attachmentMimeType: attachmentMimeType,
+      attachmentDurationMs: attachmentDurationMs,
+      attachmentLocalPath: attachmentLocalPath,
     );
 
     (_messages[conversationId] ??= []).add(sent);
@@ -477,7 +489,7 @@ class MockChatRepository implements ChatRepository {
     final idx = _conversations.indexWhere((c) => c.id == conversationId);
     if (idx >= 0) {
       _conversations[idx] = _conversations[idx].copyWith(
-        lastMessagePreview: body,
+        lastMessagePreview: sent.isVoiceNote ? '🎤 Voice message' : body,
         lastMessageSenderName: 'You',
         lastActivityAt: sent.sentAt,
       );

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../../app_routes.dart';
+import '../../l10n/app_localizations.dart';
 import 'authentication_controller.dart';
 
 class MfaPage extends GetView<AuthenticationController> {
@@ -10,10 +11,11 @@ class MfaPage extends GetView<AuthenticationController> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final codeController = TextEditingController();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Verify sign-in')),
+      appBar: AppBar(title: Text(l10n.verifySignIn)),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -31,7 +33,7 @@ class MfaPage extends GetView<AuthenticationController> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'Two-step verification',
+                    l10n.twoStepVerification,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                           fontWeight: FontWeight.bold,
@@ -39,7 +41,7 @@ class MfaPage extends GetView<AuthenticationController> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Enter the 6-digit code from your approved\nverification channel.',
+                    l10n.mfaSubtitle,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: Theme.of(context)
@@ -95,18 +97,18 @@ class MfaPage extends GetView<AuthenticationController> {
                                   color: Colors.white,
                                 ),
                               )
-                            : const Text('Verify'),
+                            : Text(l10n.verify),
                       ),
                     ),
                   ),
                   const SizedBox(height: 16),
                   TextButton(
                     onPressed: () => Get.back(),
-                    child: const Text('Back to sign-in'),
+                    child: Text(l10n.backToSignIn),
                   ),
                   const SizedBox(height: 24),
                   Text(
-                    'Demo: use code 123456',
+                    l10n.mfaDemoHint,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Theme.of(context)

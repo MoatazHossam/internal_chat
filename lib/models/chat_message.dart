@@ -14,6 +14,8 @@ class ChatMessage {
     this.replyToBody,
     this.attachmentName,
     this.attachmentMimeType,
+    this.attachmentDurationMs,
+    this.attachmentLocalPath,
   });
 
   final String id;
@@ -29,8 +31,17 @@ class ChatMessage {
   final String? attachmentName;
   final String? attachmentMimeType;
 
+  /// Voice-note duration. Only set when [attachmentMimeType] is an audio type.
+  final int? attachmentDurationMs;
+
+  /// Local playback source for a mock-recorded voice note. This is a
+  /// mock-only staging field until a real attachment download-URL contract
+  /// exists; it must not be treated as a durable server reference.
+  final String? attachmentLocalPath;
+
   bool get hasReply => replyToId != null;
   bool get hasAttachment => attachmentName != null;
+  bool get isVoiceNote => attachmentMimeType?.startsWith('audio/') ?? false;
 
   ChatMessage copyWith({
     String? id,
@@ -52,5 +63,7 @@ class ChatMessage {
         replyToBody: replyToBody ?? this.replyToBody,
         attachmentName: attachmentName,
         attachmentMimeType: attachmentMimeType,
+        attachmentDurationMs: attachmentDurationMs,
+        attachmentLocalPath: attachmentLocalPath,
       );
 }

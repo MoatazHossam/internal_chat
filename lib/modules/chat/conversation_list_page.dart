@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:intl/intl.dart';
 
 import '../../app_routes.dart';
+import '../../l10n/app_localizations.dart';
 import '../../models/conversation.dart';
 import '../../widgets/avatar_widget.dart';
 import 'chat_controller.dart';
@@ -11,6 +13,7 @@ class ConversationListPage extends GetView<ChatController> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     controller.loadConversations();
 
     final searchActive = false.obs;
@@ -29,15 +32,15 @@ class ConversationListPage extends GetView<ChatController> {
                     autofocus: true,
                     style: const TextStyle(color: Colors.white),
                     cursorColor: Colors.white,
-                    decoration: const InputDecoration(
-                      hintText: 'Search…',
-                      hintStyle: TextStyle(color: Colors.white60),
+                    decoration: InputDecoration(
+                      hintText: l10n.searchHint,
+                      hintStyle: const TextStyle(color: Colors.white60),
                       border: InputBorder.none,
                       fillColor: Colors.transparent,
                     ),
                     onChanged: (v) => searchQuery.value = v,
                   )
-                : const Text('Internal Chat'),
+                : Text(l10n.appTitle),
             actions: [
               if (searchActive.value)
                 IconButton(
@@ -51,12 +54,12 @@ class ConversationListPage extends GetView<ChatController> {
               else ...[
                 IconButton(
                   icon: const Icon(Icons.search),
-                  tooltip: 'Search',
+                  tooltip: l10n.searchTooltip,
                   onPressed: () => searchActive.value = true,
                 ),
                 IconButton(
                   icon: const Icon(Icons.settings_outlined),
-                  tooltip: 'Settings',
+                  tooltip: l10n.settingsTooltip,
                   onPressed: () => Get.toNamed(AppRoutes.settings),
                 ),
               ],
@@ -91,7 +94,7 @@ class ConversationListPage extends GetView<ChatController> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  query.isEmpty ? 'No conversations' : 'No results',
+                  query.isEmpty ? l10n.noConversations : l10n.noResults,
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: Theme.of(context)
                             .colorScheme
@@ -127,15 +130,13 @@ class ConversationListPage extends GetView<ChatController> {
         onPressed: () {
           // New conversation — placeholder until backend contacts API exists.
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'New conversation requires the contacts API.',
-              ),
-              duration: Duration(seconds: 2),
+            SnackBar(
+              content: Text(l10n.newConversationRequiresApi),
+              duration: const Duration(seconds: 2),
             ),
           );
         },
-        tooltip: 'New conversation',
+        tooltip: l10n.newConversationTooltip,
         child: const Icon(Icons.edit_outlined),
       ),
     );
@@ -150,6 +151,7 @@ class _ConversationTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = conversation;
+    final l10n = AppLocalizations.of(context)!;
     final controller = Get.find<ChatController>();
 
     return ListTile(
@@ -166,7 +168,7 @@ class _ConversationTile extends StatelessWidget {
       ),
       subtitle: c.isTyping
           ? Text(
-              'typing…',
+              l10n.typingLabel,
               style: TextStyle(
                 color: Theme.of(context).colorScheme.primary,
                 fontStyle: FontStyle.italic,
@@ -200,7 +202,7 @@ class _ConversationTile extends StatelessWidget {
         children: [
           if (c.lastActivityAt != null)
             Text(
-              _formatTimestamp(c.lastActivityAt!),
+              _formatTimestamp(context, c.lastActivityAt!, l10n),
               style: TextStyle(
                 fontSize: 12,
                 color: c.unreadCount > 0
@@ -245,25 +247,25 @@ class _ConversationTile extends StatelessWidget {
     );
   }
 
-  static String _formatTimestamp(DateTime dt) {
+  static String _formatTimestamp(
+    BuildContext context,
+    DateTime dt,
+    AppLocalizations l10n,
+  ) {
+    final locale = Localizations.localeOf(context).toString();
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final msgDay = DateTime(dt.year, dt.month, dt.day);
     final diff = today.difference(msgDay).inDays;
 
     if (diff == 0) {
-      final h = dt.hour;
-      final m = dt.minute.toString().padLeft(2, '0');
-      final period = h >= 12 ? 'PM' : 'AM';
-      final hour = h == 0 ? 12 : (h > 12 ? h - 12 : h);
-      return '$hour:$m $period';
+      return DateFormat.jm(locale).format(dt);
     } else if (diff == 1) {
-      return 'Yesterday';
+      return l10n.yesterday;
     } else if (diff < 7) {
-      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-      return days[dt.weekday - 1];
+      return DateFormat.E(locale).format(dt);
     } else {
-      return '${dt.day}/${dt.month}/${dt.year % 100}';
+      return DateFormat.yMd(locale).format(dt);
     }
   }
 }

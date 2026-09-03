@@ -49,6 +49,10 @@ class ContractChatRepository implements ChatRepository {
     String? replyToId,
     String? replyToSenderName,
     String? replyToBody,
+    String? attachmentName,
+    String? attachmentMimeType,
+    int? attachmentDurationMs,
+    String? attachmentLocalPath,
   }) async {
     sent = true;
     return ApiSuccess(
@@ -59,6 +63,10 @@ class ContractChatRepository implements ChatRepository {
         senderDisplayName: 'You',
         body: body,
         sentAt: DateTime(2026),
+        attachmentName: attachmentName,
+        attachmentMimeType: attachmentMimeType,
+        attachmentDurationMs: attachmentDurationMs,
+        attachmentLocalPath: attachmentLocalPath,
       ),
     );
   }
@@ -89,5 +97,74 @@ void main() {
 
     await controller.send('c', 'message');
     expect(repository.sent, isTrue);
+  });
+
+  test('message search finds matches and navigates between them', () {
+    final repository = ContractChatRepository();
+    final controller = ChatController(repository);
+
+    controller.messages.addAll([
+      ChatMessage(
+        id: 'm3',
+        conversationId: 'c',
+        senderId: 'other',
+        senderDisplayName: 'Other',
+        body: 'third apple update',
+        sentAt: DateTime(2026, 1, 3),
+      ),
+      ChatMessage(
+        id: 'm2',
+        conversationId: 'c',
+        senderId: 'other',
+        senderDisplayName: 'Other',
+        body: 'unrelated message',
+        sentAt: DateTime(2026, 1, 2),
+      ),
+      ChatMessage(
+        id: 'm1',
+        conversationId: 'c',
+        senderId: 'other',
+        senderDisplayName: 'Other',
+        body: 'first apple mention',
+        sentAt: DateTime(2026, 1, 1),
+      ),
+    ]);
+
+    controller.updateMessageSearch('apple');
+
+    expect(controller.messageSearchMatchIds, ['m3', 'm1']);
+    expect(controller.currentMatchMessageId.value, 'm3');
+    expect(controller.currentMatchPosition, 1);
+
+    controller.goToOlderMatch();
+    expect(controller.currentMatchMessageId.value, 'm1');
+    expect(controller.currentMatchPosition, 2);
+
+    // Already at the oldest match; stays put.
+    controller.goToOlderMatch();
+    expect(controller.currentMatchMessageId.value, 'm1');
+
+    controller.goToNewerMatch();
+    expect(controller.currentMatchMessageId.value, 'm3');
+
+    controller.closeMessageSearch();
+    expect(controller.messageSearchActive.value, isFalse);
+    expect(controller.messageSearchMatchIds, isEmpty);
+    expect(controller.currentMatchMessageId.value, isNull);
+  });
+
+  test('sendVoiceNote attaches audio metadata through the repository',
+      () async {
+    final repository = ContractChatRepository();
+    final controller = ChatController(repository);
+
+    await controller.sendVoiceNote(
+      conversationId: 'c',
+      localPath: '/tmp/voice.m4a',
+      duration: const Duration(seconds: 4),
+    );
+
+    expect(repository.sent, isTrue);
+    expect(controller.messages.single.isVoiceNote, isTrue);
   });
 }

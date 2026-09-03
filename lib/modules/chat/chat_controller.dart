@@ -29,6 +29,15 @@ class ChatController extends GetxController {
   /// Per-conversation typing state: conversationId → typer display name.
   final typingLabel = RxnString();
 
+  /// In-conversation message search state.
+  final messageSearchActive = false.obs;
+  final messageSearchQuery = ''.obs;
+
+  /// IDs of messages matching [messageSearchQuery], in the same
+  /// newest-first order as [messages].
+  final messageSearchMatchIds = <String>[].obs;
+  final currentMatchMessageId = RxnString();
+
   StreamSubscription<ChatMessage>? _messageSubscription;
   StreamSubscription<RealtimeEvent>? _realtimeSubscription;
 
@@ -86,6 +95,7 @@ class ChatController extends GetxController {
     currentConversationId.value = conversationId;
     replyTo.value = null;
     typingLabel.value = null;
+    closeMessageSearch();
 
     final result = await _repository.messages(
       conversationId,
@@ -103,6 +113,7 @@ class ChatController extends GetxController {
     replyTo.value = null;
     typingLabel.value = null;
     messages.clear();
+    closeMessageSearch();
   }
 
   // -------------------------------------------------------------------------
@@ -121,7 +132,32 @@ class ChatController extends GetxController {
       clientId: const Uuid().v4(),
       replyToId: reply?.id,
       replyToSenderName: reply?.senderDisplayName,
-      replyToBody: reply?.body,
+      replyToBody:
+          reply != null && reply.isVoiceNote ? '🎤 Voice message' : reply?.body,
+    );
+
+    switch (result) {
+      case ApiSuccess(value: final sent):
+        messages.insert(0, sent);
+        _updateConversationPreview(sent);
+      case ApiFailure(error: final apiError):
+        error.value = apiError.message;
+    }
+  }
+
+  Future<void> sendVoiceNote({
+    required String conversationId,
+    required String localPath,
+    required Duration duration,
+  }) async {
+    final result = await _repository.sendMessage(
+      conversationId: conversationId,
+      body: '',
+      clientId: const Uuid().v4(),
+      attachmentName: 'Voice message',
+      attachmentMimeType: 'audio/m4a',
+      attachmentDurationMs: duration.inMilliseconds,
+      attachmentLocalPath: localPath,
     );
 
     switch (result) {
@@ -135,6 +171,67 @@ class ChatController extends GetxController {
 
   void setReplyTo(ChatMessage? message) {
     replyTo.value = message;
+  }
+
+  // -------------------------------------------------------------------------
+  // In-conversation message search
+  // -------------------------------------------------------------------------
+
+  void openMessageSearch() {
+    messageSearchActive.value = true;
+  }
+
+  void closeMessageSearch() {
+    messageSearchActive.value = false;
+    messageSearchQuery.value = '';
+    messageSearchMatchIds.clear();
+    currentMatchMessageId.value = null;
+  }
+
+  void updateMessageSearch(String query) {
+    messageSearchQuery.value = query;
+
+    final normalized = query.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      messageSearchMatchIds.clear();
+      currentMatchMessageId.value = null;
+      return;
+    }
+
+    final ids = messages
+        .where((m) => m.body.toLowerCase().contains(normalized))
+        .map((m) => m.id)
+        .toList();
+    messageSearchMatchIds.assignAll(ids);
+    currentMatchMessageId.value = ids.isEmpty ? null : ids.first;
+  }
+
+  /// 1-based position of the current match among [messageSearchMatchIds],
+  /// or 0 when there is no current match.
+  int get currentMatchPosition {
+    final id = currentMatchMessageId.value;
+    if (id == null) return 0;
+    return messageSearchMatchIds.indexOf(id) + 1;
+  }
+
+  /// Moves to the next older match (further up the conversation).
+  void goToOlderMatch() {
+    final ids = messageSearchMatchIds;
+    if (ids.isEmpty) return;
+    final idx = ids.indexOf(currentMatchMessageId.value);
+    if (idx >= 0 && idx < ids.length - 1) {
+      currentMatchMessageId.value = ids[idx + 1];
+    }
+  }
+
+  /// Moves to the next newer match (further down the conversation).
+  void goToNewerMatch() {
+    final ids = messageSearchMatchIds;
+    if (ids.isEmpty) return;
+    final idx = ids.indexOf(currentMatchMessageId.value);
+    if (idx > 0) {
+      currentMatchMessageId.value = ids[idx - 1];
+    }
   }
 
   // -------------------------------------------------------------------------

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../../app_routes.dart';
+import '../../l10n/app_localizations.dart';
 import 'authentication_controller.dart';
 
 class LoginPage extends GetView<AuthenticationController> {
@@ -9,6 +10,7 @@ class LoginPage extends GetView<AuthenticationController> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final idController = TextEditingController();
     final passwordController = TextEditingController();
     final obscure = true.obs;
@@ -32,7 +34,7 @@ class LoginPage extends GetView<AuthenticationController> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'Internal Chat',
+                    l10n.appTitle,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                           fontWeight: FontWeight.bold,
@@ -40,7 +42,7 @@ class LoginPage extends GetView<AuthenticationController> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Sign in with your organizational account',
+                    l10n.loginSubtitle,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: Theme.of(context)
@@ -56,9 +58,9 @@ class LoginPage extends GetView<AuthenticationController> {
                     controller: idController,
                     keyboardType: TextInputType.emailAddress,
                     textInputAction: TextInputAction.next,
-                    decoration: const InputDecoration(
-                      labelText: 'Email or username',
-                      prefixIcon: Icon(Icons.person_outline),
+                    decoration: InputDecoration(
+                      labelText: l10n.emailOrUsername,
+                      prefixIcon: const Icon(Icons.person_outline),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -70,7 +72,7 @@ class LoginPage extends GetView<AuthenticationController> {
                       obscureText: obscure.value,
                       textInputAction: TextInputAction.done,
                       decoration: InputDecoration(
-                        labelText: 'Password',
+                        labelText: l10n.password,
                         prefixIcon: const Icon(Icons.lock_outline),
                         suffixIcon: IconButton(
                           icon: Icon(
@@ -128,14 +130,14 @@ class LoginPage extends GetView<AuthenticationController> {
                                   color: Colors.white,
                                 ),
                               )
-                            : const Text('Sign in'),
+                            : Text(l10n.signIn),
                       ),
                     ),
                   ),
 
                   const SizedBox(height: 24),
                   Text(
-                    'Access is restricted to authorized personnel.\nContact IT support if you cannot sign in.',
+                    l10n.loginFooter,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Theme.of(context)

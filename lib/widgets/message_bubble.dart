@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../models/chat_message.dart';
+import 'voice_note_player.dart';
 
 /// A WhatsApp-style message bubble.
 class MessageBubble extends StatelessWidget {
@@ -9,6 +11,8 @@ class MessageBubble extends StatelessWidget {
     required this.message,
     required this.isFromMe,
     this.showSenderName = false,
+    this.highlightQuery,
+    this.isCurrentMatch = false,
   });
 
   final ChatMessage message;
@@ -16,6 +20,13 @@ class MessageBubble extends StatelessWidget {
 
   /// Show sender name above the body (used in group chats for incoming msgs).
   final bool showSenderName;
+
+  /// When set, occurrences of this text within [message.body] are
+  /// highlighted (used by in-conversation search).
+  final String? highlightQuery;
+
+  /// Whether this bubble is the currently focused search match.
+  final bool isCurrentMatch;
 
   static const _senderPalette = <Color>[
     Color(0xFFE57373),
@@ -66,6 +77,12 @@ class MessageBubble extends StatelessWidget {
               bottomLeft: Radius.circular(isFromMe ? 10 : 2),
               bottomRight: Radius.circular(isFromMe ? 2 : 10),
             ),
+            border: isCurrentMatch
+                ? Border.all(
+                    color: Theme.of(context).colorScheme.primary,
+                    width: 2,
+                  )
+                : null,
             boxShadow: const [
               BoxShadow(
                 color: Colors.black12,
@@ -95,7 +112,10 @@ class MessageBubble extends StatelessWidget {
               if (message.hasAttachment)
                 _AttachmentPreview(message: message)
               else
-                Text(message.body, style: const TextStyle(fontSize: 15)),
+                _HighlightedBody(
+                  text: message.body,
+                  query: highlightQuery,
+                ),
               const SizedBox(height: 2),
               Row(
                 mainAxisSize: MainAxisSize.min,
@@ -103,7 +123,7 @@ class MessageBubble extends StatelessWidget {
                 children: [
                   const Spacer(),
                   Text(
-                    _formatTime(message.sentAt),
+                    _formatTime(context, message.sentAt),
                     style: TextStyle(
                       fontSize: 11,
                       color: isDark ? Colors.white54 : Colors.black45,
@@ -122,12 +142,54 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
-  static String _formatTime(DateTime dt) {
-    final h = dt.hour;
-    final m = dt.minute.toString().padLeft(2, '0');
-    final period = h >= 12 ? 'PM' : 'AM';
-    final hour = h == 0 ? 12 : (h > 12 ? h - 12 : h);
-    return '$hour:$m $period';
+  static String _formatTime(BuildContext context, DateTime dt) {
+    final locale = Localizations.localeOf(context).toString();
+    return DateFormat.jm(locale).format(dt);
+  }
+}
+
+class _HighlightedBody extends StatelessWidget {
+  const _HighlightedBody({required this.text, this.query});
+
+  final String text;
+  final String? query;
+
+  @override
+  Widget build(BuildContext context) {
+    const style = TextStyle(fontSize: 15);
+    final q = query?.trim();
+    if (q == null || q.isEmpty) {
+      return Text(text, style: style);
+    }
+
+    final lowerText = text.toLowerCase();
+    final lowerQuery = q.toLowerCase();
+    final spans = <TextSpan>[];
+    var start = 0;
+
+    while (true) {
+      final index = lowerText.indexOf(lowerQuery, start);
+      if (index < 0) {
+        spans.add(TextSpan(text: text.substring(start)));
+        break;
+      }
+      if (index > start) {
+        spans.add(TextSpan(text: text.substring(start, index)));
+      }
+      spans.add(
+        TextSpan(
+          text: text.substring(index, index + q.length),
+          style: const TextStyle(
+            backgroundColor: Color(0xFFFFEB3B),
+            color: Colors.black,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      );
+      start = index + q.length;
+    }
+
+    return Text.rich(TextSpan(children: spans), style: style);
   }
 }
 
@@ -186,6 +248,35 @@ class _AttachmentPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (message.isVoiceNote) {
+      final path = message.attachmentLocalPath;
+      final duration =
+          Duration(milliseconds: message.attachmentDurationMs ?? 0);
+      final accent = Theme.of(context).colorScheme.primary;
+
+      if (path == null) {
+        // No local playback source available (e.g. arriving from another
+        // device in a real backend). Show a disabled placeholder.
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.mic, size: 18, color: accent),
+            const SizedBox(width: 6),
+            Text(
+              _durationLabel(duration),
+              style: const TextStyle(fontSize: 13),
+            ),
+          ],
+        );
+      }
+
+      return VoiceNotePlayer(
+        source: path,
+        totalDuration: duration,
+        accentColor: accent,
+      );
+    }
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -201,6 +292,12 @@ class _AttachmentPreview extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  static String _durationLabel(Duration d) {
+    final minutes = d.inMinutes.remainder(60);
+    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
   }
 }
 

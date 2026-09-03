@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../../l10n/app_localizations.dart';
 import 'file_controller.dart';
 
 class FilePage extends GetView<FileController> {
@@ -8,8 +9,10 @@ class FilePage extends GetView<FileController> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Attachments')),
+      appBar: AppBar(title: Text(l10n.attachmentsTitle)),
       body: Obx(
         () => controller.uploads.isEmpty
             ? Center(
@@ -26,7 +29,7 @@ class FilePage extends GetView<FileController> {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'No attachments yet',
+                      l10n.noAttachmentsYet,
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                             color: Theme.of(context)
                                 .colorScheme

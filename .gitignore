@@ -1,6 +1,7 @@
 # Miscellaneous
 *.class
 *.lock
+!pubspec.lock
 *.log
 *.pyc
 *.swp
@@ -37,6 +38,8 @@ analysis_benchmark.json
 .flutter-plugins
 .flutter-plugins-dependencies
 **/generated_plugin_registrant.dart
+/lib/l10n/app_localizations.dart
+/lib/l10n/app_localizations_*.dart
 .packages
 .pub-preload-cache/
 .pub/

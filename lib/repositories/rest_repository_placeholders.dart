@@ -79,6 +79,10 @@ class RestChatRepository implements ChatRepository {
     String? replyToId,
     String? replyToSenderName,
     String? replyToBody,
+    String? attachmentName,
+    String? attachmentMimeType,
+    int? attachmentDurationMs,
+    String? attachmentLocalPath,
   }) async =>
       _pending();
 }
