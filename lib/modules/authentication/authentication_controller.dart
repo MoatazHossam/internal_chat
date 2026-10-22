@@ -1,72 +1,35 @@
 import 'package:get/get.dart';
 
-import '../../models/api_result.dart';
-import '../../models/authentication.dart';
-import '../../models/user.dart';
-import '../../repositories/authentication_repository.dart';
+import '../../domain/chat_backend.dart';
+import '../../domain/chat_failure.dart';
 
+/// Password sign-in. The server offers no SSO, MFA or registration; accounts
+/// are created by an administrator. Navigation after sign-in is handled by
+/// the session controller.
 class AuthenticationController extends GetxController {
-  AuthenticationController(this._repository);
+  AuthenticationController(this._session);
 
-  final AuthenticationRepository _repository;
+  final ChatSession _session;
 
-  final user = Rxn<User>();
-  final error = RxnString();
+  final failure = Rxn<ChatFailure>();
   final loading = false.obs;
-  final mfaChallenge = RxnString();
 
-  Future<bool> signIn(String identifier, String password) async {
-    loading.value = true;
-    error.value = null;
-
-    final result = await _repository.signIn(
-      identifier: identifier,
-      password: password,
-    );
-
-    loading.value = false;
-
-    switch (result) {
-      case ApiSuccess(value: final Authenticated auth):
-        user.value = auth.user;
-        return true;
-      case ApiSuccess(value: final MfaRequired mfa):
-        mfaChallenge.value = mfa.challengeId;
-        return false;
-      case ApiFailure(error: final e):
-        error.value = e.message;
-        return false;
+  Future<bool> signIn(String username, String password) async {
+    if (loading.value) return false;
+    if (username.trim().isEmpty || password.isEmpty) {
+      failure.value = const InvalidCredentials();
+      return false;
     }
-  }
-
-  Future<bool> verifyMfa(String code) async {
-    final challenge = mfaChallenge.value;
-    if (challenge == null) return false;
-
     loading.value = true;
-    error.value = null;
-
-    final result = await _repository.verifyMfa(
-      challengeId: challenge,
-      code: code,
-    );
-
-    loading.value = false;
-
-    switch (result) {
-      case ApiSuccess(value: final auth):
-        user.value = auth.user;
-        mfaChallenge.value = null;
-        return true;
-      case ApiFailure(error: final e):
-        error.value = e.message;
-        return false;
+    failure.value = null;
+    try {
+      await _session.signIn(username: username, password: password);
+      return true;
+    } on ChatFailure catch (error) {
+      failure.value = error;
+      return false;
+    } finally {
+      loading.value = false;
     }
-  }
-
-  Future<void> signOut() async {
-    await _repository.signOut();
-    user.value = null;
-    mfaChallenge.value = null;
   }
 }

@@ -1,42 +1,68 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:internal_chat/models/api_result.dart';
-import 'package:internal_chat/models/authentication.dart';
-import 'package:internal_chat/models/user.dart';
+import 'package:internal_chat/domain/chat_backend.dart';
+import 'package:internal_chat/domain/chat_failure.dart';
+import 'package:internal_chat/domain/session_state.dart';
 import 'package:internal_chat/modules/authentication/authentication_controller.dart';
-import 'package:internal_chat/repositories/authentication_repository.dart';
 
-class FakeAuthenticationRepository implements AuthenticationRepository {
-  bool called = false;
+class FakeChatSession implements ChatSession {
+  FakeChatSession({this.failure});
+
+  final ChatFailure? failure;
+  String? username;
+  String? password;
+
   @override
-  Future<ApiResult<AuthenticationOutcome>> signIn(
-      {required String identifier, required String password}) async {
-    called = true;
-    return const ApiSuccess(Authenticated(
-        User(
-            id: '1',
-            displayName: 'Contract User',
-            email: 'user@example.invalid'),
-        AuthTokens(accessToken: 'test-token')));
+  Stream<SessionState> get sessionState => const Stream.empty();
+
+  @override
+  SessionState get currentSessionState =>
+      const SessionState(SessionStatus.signedOut);
+
+  @override
+  Future<void> restore() async {}
+
+  @override
+  Future<void> signIn({
+    required String username,
+    required String password,
+  }) async {
+    this.username = username;
+    this.password = password;
+    final failure = this.failure;
+    if (failure != null) throw failure;
   }
 
   @override
-  Future<User?> currentUser() async => null;
-  @override
   Future<void> signOut() async {}
-  @override
-  Future<ApiResult<Authenticated>> verifyMfa(
-          {required String challengeId, required String code}) async =>
-      throw UnimplementedError();
 }
 
 void main() {
-  test('authentication controller uses repository contract and stores result',
-      () async {
-    final repository = FakeAuthenticationRepository();
-    final controller = AuthenticationController(repository);
-    expect(await controller.signIn('user', 'password'), isTrue);
-    expect(repository.called, isTrue);
-    expect(controller.user.value?.displayName, 'Contract User');
-    expect(controller.user.value?.id, '1');
+  test('signs in through the session contract', () async {
+    final session = FakeChatSession();
+    final controller = AuthenticationController(session);
+
+    expect(await controller.signIn('moataz', 'correct horse battery'), isTrue);
+    expect(session.username, 'moataz');
+    expect(session.password, 'correct horse battery');
+    expect(controller.failure.value, isNull);
+    expect(controller.loading.value, isFalse);
+  });
+
+  test('reports the domain failure from the backend', () async {
+    final controller = AuthenticationController(
+      FakeChatSession(failure: const RateLimited(Duration(seconds: 30))),
+    );
+
+    expect(await controller.signIn('moataz', 'password'), isFalse);
+    expect(controller.failure.value, isA<RateLimited>());
+  });
+
+  test('does not call the backend with empty credentials', () async {
+    final session = FakeChatSession();
+    final controller = AuthenticationController(session);
+
+    expect(await controller.signIn('  ', ''), isFalse);
+    expect(session.username, isNull);
+    expect(controller.failure.value, isA<InvalidCredentials>());
   });
 }

@@ -18,8 +18,6 @@ abstract final class LocaleService {
     );
   }
 
-  static Future<void> set(Locale locale) => GetStorage().write(
-        _key,
-        locale.languageCode,
-      );
+  static Future<void> set(Locale locale) =>
+      GetStorage().write(_key, locale.languageCode);
 }

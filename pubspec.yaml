@@ -4,8 +4,9 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.4.0 <4.0.0'
-  flutter: '>=3.22.0'
+  # matrix 14 needs Dart 3.11; flutter_vodozemac 0.8 needs Flutter 3.38.
+  sdk: '>=3.11.0 <4.0.0'
+  flutter: '>=3.38.0'
 
 dependencies:
   flutter:
@@ -26,11 +27,27 @@ dependencies:
   http: ^1.2.2
   record: ^7.1.1
   audioplayers: ^6.1.0
+  # Matrix SDK + E2EE. Both are AGPL-3.0: accepted for the POC only, legal
+  # review pending (see README "Licence"). Only lib/data/matrix/ imports them.
+  # Keep flutter_vodozemac on 0.8.x until matrix depends on vodozemac 0.9.
+  matrix: ^14.1.0
+  flutter_vodozemac: ^0.8.1
+  # Opens the SDK store through package:sqlite3, built as SQLCipher below.
+  sqflite_common_ffi: ^2.4.4
+  path: ^1.9.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+
+# The local Matrix store (messages, room keys, tokens) must be encrypted at
+# rest, so package:sqlite3 links SQLCipher instead of plain SQLite. The app
+# refuses to start if SQLCipher is not available.
+hooks:
+  user_defines:
+    sqlite3:
+      source: sqlcipher
 
 flutter:
   uses-material-design: true

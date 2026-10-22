@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -8,14 +10,21 @@ import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
+import '../../app_routes.dart';
+import '../../domain/chat_backend.dart';
+import '../../domain/chat_failure.dart';
+import '../../domain/ids.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/chat_message.dart';
 import '../../models/conversation.dart';
-import '../../services/contracts.dart';
+import '../../utilities/message_labels.dart';
 import '../../widgets/avatar_widget.dart';
+import '../../widgets/failure_listener.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/typing_indicator.dart';
 import 'chat_controller.dart';
+
+const _quickReactions = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
 /// Holds the search-scroll worker in a mutable box so [ConversationPage]
 /// (a `StatelessWidget`) can lazily create and dispose it without violating
@@ -33,38 +42,42 @@ class ConversationPage extends GetView<ChatController> {
   final Map<String, GlobalKey> _messageKeys = {};
   final _searchWorkerBox = _WorkerBox();
 
+  ConversationId get _conversationId {
+    final open = controller.currentConversationId.value;
+    if (open != null) return open;
+    // Opened from a route without going through the list. Opening changes
+    // observable state, so it must not happen during build.
+    final id = ConversationId(Uri.decodeComponent(Get.parameters['id'] ?? ''));
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => controller.openConversation(id),
+    );
+    return id;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final conversationId = Get.parameters['id'] ?? '';
-    final title = Get.parameters['title'] ?? 'Chat';
-    final isGroup = Get.parameters['kind'] == ConversationKind.group.name;
+    final conversationId = _conversationId;
 
-    // Wire up realtime typing events from the realtime service.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final realtimeService = Get.find<RealtimeService>();
-      controller.listenToRealtime(realtimeService.events);
-    });
-
-    _searchWorkerBox.worker ??=
-        ever<String?>(controller.currentMatchMessageId, (
-      id,
-    ) {
-      if (id == null) return;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final matchContext = _messageKeys[id]?.currentContext;
-        if (matchContext != null) {
-          Scrollable.ensureVisible(
-            matchContext,
-            duration: const Duration(milliseconds: 250),
-            alignment: 0.5,
-          );
-        }
-      });
-    });
+    _searchWorkerBox.worker ??= ever<String?>(
+      controller.currentMatchMessageId,
+      (id) {
+        if (id == null) return;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final matchContext = _messageKeys[id]?.currentContext;
+          if (matchContext != null) {
+            Scrollable.ensureVisible(
+              matchContext,
+              duration: const Duration(milliseconds: 250),
+              alignment: 0.5,
+            );
+          }
+        });
+      },
+    );
 
     return PopScope(
-      onPopInvokedWithResult: (_, __) {
+      onPopInvokedWithResult: (_, _) {
         _searchWorkerBox.worker?.dispose();
         _searchWorkerBox.worker = null;
         controller.closeConversation();
@@ -76,6 +89,8 @@ class ConversationPage extends GetView<ChatController> {
             if (controller.messageSearchActive.value) {
               return _SearchAppBar(controller: controller, l10n: l10n);
             }
+            final conversation = controller.currentConversation;
+            final title = conversation?.title ?? '';
             return AppBar(
               titleSpacing: 0,
               title: Row(
@@ -88,34 +103,18 @@ class ConversationPage extends GetView<ChatController> {
                       children: [
                         Text(
                           title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        Obx(() {
-                          final typing = controller.typingLabel.value;
-                          if (typing != null) {
-                            return Text(
-                              l10n.isTypingSuffix(typing),
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontStyle: FontStyle.italic,
-                                color: Colors.white70,
-                              ),
-                            );
-                          }
-                          if (isGroup) {
-                            return const SizedBox.shrink();
-                          }
-                          return Text(
-                            l10n.tapForInfo,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.white70,
-                            ),
-                          );
-                        }),
+                        _AppBarSubtitle(
+                          controller: controller,
+                          conversation: conversation,
+                          l10n: l10n,
+                        ),
                       ],
                     ),
                   ),
@@ -125,109 +124,153 @@ class ConversationPage extends GetView<ChatController> {
                 IconButton(
                   icon: const Icon(Icons.more_vert),
                   onPressed: () =>
-                      _showConversationMenu(context, l10n, controller),
+                      _showConversationMenu(context, l10n, conversationId),
                 ),
               ],
             );
           }),
         ),
-        body: Column(
-          children: [
-            Expanded(
-              child: Container(
-                color: Theme.of(context).brightness == Brightness.dark
-                    ? const Color(0xFF0D1418)
-                    : const Color(0xFFECE5DD),
-                child: Obx(() {
-                  final msgs = controller.messages;
-
-                  return ListView.builder(
-                    controller: _scrollController,
-                    reverse: true,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 8,
-                    ),
-                    itemCount: msgs.length + 1,
-                    itemBuilder: (context, index) {
-                      // Show typing indicator at top (bottom of reversed list).
-                      if (index == msgs.length) {
-                        return Obx(() {
-                          if (controller.typingLabel.value == null) {
-                            return const SizedBox.shrink();
-                          }
-                          return const Padding(
-                            padding: EdgeInsets.only(left: 12, bottom: 4),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: TypingIndicator(),
-                            ),
-                          );
-                        });
+        body: FailureListener(
+          failure: controller.failure,
+          child: Column(
+            children: [
+              Expanded(
+                child: Container(
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? const Color(0xFF0D1418)
+                      : const Color(0xFFECE5DD),
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: (notification) {
+                      final metrics = notification.metrics;
+                      if (metrics.pixels >= metrics.maxScrollExtent - 300) {
+                        controller.loadOlder();
                       }
+                      return false;
+                    },
+                    child: Obx(() {
+                      final msgs = controller.messages;
+                      final isGroup =
+                          controller.currentConversation?.kind ==
+                          ConversationKind.group;
 
-                      final msg = msgs[index];
-                      final isFromMe = msg.senderId == 'current-user';
-                      final key = _messageKeys.putIfAbsent(
-                        msg.id,
-                        () => GlobalKey(),
-                      );
+                      return ListView.builder(
+                        controller: _scrollController,
+                        reverse: true,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 8,
+                        ),
+                        itemCount: msgs.length + 1,
+                        itemBuilder: (context, index) {
+                          // Typing and history loading at the top (the end of
+                          // the reversed list).
+                          if (index == msgs.length) {
+                            return _ListHeader(controller: controller);
+                          }
 
-                      // Date separator between messages on different days.
-                      final showDateSeparator = _shouldShowDateSeparator(
-                        msgs,
-                        index,
-                      );
+                          final msg = msgs[index];
+                          final key = _messageKeys.putIfAbsent(
+                            msg.id,
+                            () => GlobalKey(),
+                          );
+                          final showDateSeparator = _shouldShowDateSeparator(
+                            msgs,
+                            index,
+                          );
 
-                      return Column(
-                        key: key,
-                        children: [
-                          if (showDateSeparator)
-                            _DateSeparator(date: msg.sentAt, l10n: l10n),
-                          GestureDetector(
-                            onLongPress: () =>
-                                _showMessageOptions(context, l10n, msg),
-                            child: Obx(
-                              () => MessageBubble(
-                                message: msg,
-                                isFromMe: isFromMe,
-                                showSenderName: isGroup,
-                                highlightQuery:
-                                    controller.messageSearchQuery.value,
-                                isCurrentMatch:
-                                    controller.currentMatchMessageId.value ==
+                          return Column(
+                            key: key,
+                            children: [
+                              if (showDateSeparator)
+                                _DateSeparator(date: msg.sentAt, l10n: l10n),
+                              GestureDetector(
+                                onLongPress: () =>
+                                    _showMessageOptions(context, l10n, msg),
+                                onTap: msg.isFailed
+                                    ? () => _showMessageOptions(
+                                        context,
+                                        l10n,
+                                        msg,
+                                      )
+                                    : null,
+                                child: Obx(
+                                  () => MessageBubble(
+                                    message: msg,
+                                    showSenderName: isGroup,
+                                    highlightQuery:
+                                        controller.messageSearchQuery.value,
+                                    isCurrentMatch:
+                                        controller
+                                            .currentMatchMessageId
+                                            .value ==
                                         msg.id,
+                                    loadAttachment:
+                                        ({bool thumbnail = false}) =>
+                                            controller.attachmentBytes(
+                                              msg,
+                                              thumbnail: thumbnail,
+                                            ),
+                                    onOpenAttachment: () =>
+                                        _openAttachment(context, l10n, msg),
+                                    onReactionTap: (reaction) => controller
+                                        .toggleReaction(msg, reaction),
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                        ],
+                            ],
+                          );
+                        },
                       );
+                    }),
+                  ),
+                ),
+              ),
+
+              // Reply or edit bar
+              Obx(() {
+                final editing = controller.editing.value;
+                if (editing != null) {
+                  return _ComposerContextBar(
+                    title: l10n.editingMessage,
+                    body: editing.body,
+                    icon: Icons.edit,
+                    onDismiss: () {
+                      controller.cancelEditing();
+                      _input.clear();
+                      _hasText.value = false;
                     },
                   );
-                }),
-              ),
-            ),
+                }
+                final reply = controller.replyTo.value;
+                if (reply == null) return const SizedBox.shrink();
+                return _ComposerContextBar(
+                  title: reply.senderDisplayName,
+                  body: messagePreviewText(
+                    l10n,
+                    reply.kind,
+                    reply.body,
+                    attachmentName: reply.attachmentName,
+                  ),
+                  onDismiss: () => controller.setReplyTo(null),
+                );
+              }),
 
-            // Reply bar
-            Obx(() {
-              final reply = controller.replyTo.value;
-              if (reply == null) return const SizedBox.shrink();
-              return _ReplyBar(
-                message: reply,
-                onDismiss: () => controller.setReplyTo(null),
-                l10n: l10n,
-              );
-            }),
-
-            // Input bar
-            _InputBar(
-              conversationId: conversationId,
-              inputController: _input,
-              hasText: _hasText,
-              controller: controller,
-              l10n: l10n,
-            ),
-          ],
+              // Input bar, or why sending is disabled.
+              Obx(() {
+                final conversation = controller.currentConversation;
+                if (conversation != null && !conversation.isEncrypted) {
+                  return _SendingDisabledBar(text: l10n.notEncryptedComposer);
+                }
+                return _InputBar(
+                  conversationId: conversationId,
+                  inputController: _input,
+                  hasText: _hasText,
+                  controller: controller,
+                  l10n: l10n,
+                );
+              }),
+            ],
+          ),
         ),
       ),
     );
@@ -249,30 +292,247 @@ class ConversationPage extends GetView<ChatController> {
     AppLocalizations l10n,
     ChatMessage message,
   ) {
+    final isSent = !message.isPending && !message.isFailed;
+    final canInteract =
+        isSent &&
+        message.kind != MessageKind.deleted &&
+        message.kind != MessageKind.undecryptable;
+
     showModalBottomSheet<void>(
       context: context,
-      builder: (_) => SafeArea(
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (canInteract)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    for (final reaction in _quickReactions)
+                      InkWell(
+                        borderRadius: BorderRadius.circular(24),
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          controller.toggleReaction(message, reaction);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Text(
+                            reaction,
+                            style: const TextStyle(fontSize: 26),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            if (message.isFailed)
+              ListTile(
+                leading: const Icon(Icons.refresh),
+                title: Text(l10n.retry),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  controller.retry(message);
+                },
+              ),
+            if (canInteract)
+              ListTile(
+                leading: const Icon(Icons.reply),
+                title: Text(l10n.reply),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  controller.setReplyTo(message);
+                },
+              ),
+            if (message.kind == MessageKind.text)
+              ListTile(
+                leading: const Icon(Icons.copy),
+                title: Text(l10n.copyText),
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  await Clipboard.setData(ClipboardData(text: message.body));
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(l10n.copiedToClipboard)),
+                  );
+                },
+              ),
+            if (message.canEdit)
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: Text(l10n.edit),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  controller.startEditing(message);
+                  _input.text = message.body;
+                  _hasText.value = message.body.trim().isNotEmpty;
+                },
+              ),
+            if (message.canDelete)
+              ListTile(
+                leading: Icon(
+                  Icons.delete_outline,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                title: Text(
+                  l10n.delete,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _confirmDelete(context, l10n, message);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmDelete(
+    BuildContext context,
+    AppLocalizations l10n,
+    ChatMessage message,
+  ) async {
+    // Unsent messages are simply discarded; nothing reached the server.
+    if (message.isFailed || message.isPending) {
+      await controller.delete(message);
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l10n.deleteConfirmTitle),
+        content: Text(l10n.deleteConfirmBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(l10n.cancel),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(l10n.delete),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await controller.delete(message);
+  }
+
+  Future<void> _openAttachment(
+    BuildContext context,
+    AppLocalizations l10n,
+    ChatMessage message,
+  ) async {
+    if (message.kind == MessageKind.image) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => Dialog.fullscreen(
+          backgroundColor: Colors.black,
+          child: Stack(
+            children: [
+              Center(
+                child: FutureBuilder<Uint8List>(
+                  future: controller.attachmentBytes(message),
+                  builder: (context, snapshot) {
+                    final bytes = snapshot.data;
+                    if (bytes == null) {
+                      return snapshot.hasError
+                          ? const Icon(
+                              Icons.broken_image_outlined,
+                              color: Colors.white54,
+                              size: 48,
+                            )
+                          : const CircularProgressIndicator();
+                    }
+                    return InteractiveViewer(child: Image.memory(bytes));
+                  },
+                ),
+              ),
+              SafeArea(
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => Navigator.pop(dialogContext),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      return;
+    }
+
+    // Other files: decrypt into memory and let the user choose where to save
+    // the copy. Saved copies are outside the app's control.
+    try {
+      final bytes = await controller.attachmentBytes(message);
+      final path = await FilePicker.platform.saveFile(
+        fileName: message.attachmentName ?? 'file',
+        bytes: bytes,
+      );
+      if (path != null && context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(l10n.fileSaved)));
+      }
+    } on ChatFailure catch (failure) {
+      controller.failure
+        ..value = failure
+        ..refresh();
+    } catch (_) {
+      controller.failure
+        ..value = const UnexpectedFailure()
+        ..refresh();
+    }
+  }
+
+  void _showConversationMenu(
+    BuildContext context,
+    AppLocalizations l10n,
+    ConversationId conversationId,
+  ) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.reply),
-              title: Text(l10n.reply),
+              leading: const Icon(Icons.info_outline),
+              title: Text(l10n.conversationInfo),
               onTap: () {
-                Navigator.pop(context);
-                controller.setReplyTo(message);
+                Navigator.pop(sheetContext);
+                Get.toNamed(
+                  AppRoutes.conversationInfo,
+                  arguments: conversationId,
+                );
               },
             ),
             ListTile(
-              leading: const Icon(Icons.copy),
-              title: Text(l10n.copyText),
-              onTap: () async {
-                Navigator.pop(context);
-                await Clipboard.setData(ClipboardData(text: message.body));
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(l10n.copiedToClipboard)),
-                );
+              leading: const Icon(Icons.search),
+              title: Text(l10n.searchInConversation),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                controller.openMessageSearch();
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.logout,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              title: Text(
+                l10n.leaveConversation,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _confirmLeave(context, l10n, conversationId);
               },
             ),
           ],
@@ -281,34 +541,125 @@ class ConversationPage extends GetView<ChatController> {
     );
   }
 
-  void _showConversationMenu(
+  Future<void> _confirmLeave(
     BuildContext context,
     AppLocalizations l10n,
-    ChatController controller,
-  ) {
-    showModalBottomSheet<void>(
+    ConversationId conversationId,
+  ) async {
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.info_outline),
-              title: Text(l10n.conversationInfo),
-              onTap: () => Navigator.pop(context),
-            ),
-            ListTile(
-              leading: const Icon(Icons.search),
-              title: Text(l10n.searchInConversation),
-              onTap: () {
-                Navigator.pop(context);
-                controller.openMessageSearch();
-              },
-            ),
-          ],
-        ),
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l10n.leaveConversation),
+        content: Text(l10n.leaveConfirmBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(l10n.leaveConversation),
+          ),
+        ],
       ),
     );
+    if (confirmed != true) return;
+    await controller.leave(conversationId);
+    if (context.mounted) Navigator.of(context).maybePop();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// App bar subtitle
+// ---------------------------------------------------------------------------
+
+class _AppBarSubtitle extends StatelessWidget {
+  const _AppBarSubtitle({
+    required this.controller,
+    required this.conversation,
+    required this.l10n,
+  });
+
+  final ChatController controller;
+  final Conversation? conversation;
+  final AppLocalizations l10n;
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(() {
+      final typing = controller.typingLabel.value;
+      if (typing != null) {
+        return Text(
+          l10n.isTypingSuffix(typing),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 12,
+            fontStyle: FontStyle.italic,
+            color: Colors.white70,
+          ),
+        );
+      }
+      final current = conversation;
+      if (current == null) return const SizedBox.shrink();
+      final encrypted = current.isEncrypted;
+      return Row(
+        children: [
+          Icon(
+            encrypted ? Icons.lock_outline : Icons.no_encryption_outlined,
+            size: 12,
+            color: encrypted ? Colors.white70 : Colors.orangeAccent,
+          ),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              encrypted ? l10n.encryptedSubtitle : l10n.notEncryptedBadge,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: encrypted ? Colors.white70 : Colors.orangeAccent,
+              ),
+            ),
+          ),
+        ],
+      );
+    });
+  }
+}
+
+class _ListHeader extends StatelessWidget {
+  const _ListHeader({required this.controller});
+
+  final ChatController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(() {
+      final children = <Widget>[
+        if (controller.loadingOlder.value)
+          const Padding(
+            padding: EdgeInsets.all(12),
+            child: Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          ),
+        if (controller.typingLabel.value != null)
+          const Padding(
+            padding: EdgeInsets.only(left: 12, bottom: 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TypingIndicator(),
+            ),
+          ),
+      ];
+      if (children.isEmpty) return const SizedBox.shrink();
+      return Column(mainAxisSize: MainAxisSize.min, children: children);
+    });
   }
 }
 
@@ -387,6 +738,37 @@ class _SearchAppBar extends StatelessWidget implements PreferredSizeWidget {
 // Input bar
 // ---------------------------------------------------------------------------
 
+class _SendingDisabledBar extends StatelessWidget {
+  const _SendingDisabledBar({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SafeArea(
+      top: false,
+      child: Container(
+        width: double.infinity,
+        color: scheme.errorContainer,
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Icon(Icons.no_encryption_outlined, color: scheme.onErrorContainer),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                text,
+                style: TextStyle(color: scheme.onErrorContainer, fontSize: 13),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _InputBar extends StatefulWidget {
   const _InputBar({
     required this.conversationId,
@@ -396,7 +778,7 @@ class _InputBar extends StatefulWidget {
     required this.l10n,
   });
 
-  final String conversationId;
+  final ConversationId conversationId;
   final TextEditingController inputController;
   final RxBool hasText;
   final ChatController controller;
@@ -470,23 +852,115 @@ class _InputBarState extends State<_InputBar> {
 
     await _recorder.stop();
 
-    if (duration < const Duration(seconds: 1)) {
-      // Too short to be a meaningful voice note; discard silently, matching
-      // common chat-app behavior for accidental taps.
-      try {
-        final file = File(path);
-        if (file.existsSync()) await file.delete();
-      } catch (_) {
-        // Best-effort cleanup; nothing to recover from here.
+    // The recording is read into memory and its plaintext file deleted
+    // right away; the backend encrypts the bytes before upload.
+    Uint8List? bytes;
+    try {
+      final file = File(path);
+      // Shorter than a second is an accidental tap; discard it, matching
+      // common chat-app behaviour.
+      if (duration >= const Duration(seconds: 1)) {
+        bytes = await file.readAsBytes();
       }
-      return;
+      if (file.existsSync()) await file.delete();
+    } catch (_) {
+      // Best-effort cleanup; nothing to recover from here.
     }
+    if (bytes == null) return;
 
     await widget.controller.sendVoiceNote(
       conversationId: widget.conversationId,
-      localPath: path,
+      file: FileSource(
+        name: 'voice-message.m4a',
+        bytes: bytes,
+        mimeType: 'audio/mp4',
+      ),
       duration: duration,
     );
+  }
+
+  Future<void> _pickAttachment() async {
+    final l10n = widget.l10n;
+    final type = await showModalBottomSheet<FileType>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_outlined),
+              title: Text(l10n.photo),
+              onTap: () => Navigator.pop(sheetContext, FileType.image),
+            ),
+            ListTile(
+              leading: const Icon(Icons.insert_drive_file_outlined),
+              title: Text(l10n.document),
+              onTap: () => Navigator.pop(sheetContext, FileType.any),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (type == null) return;
+
+    final result = await FilePicker.platform.pickFiles(
+      type: type,
+      withData: kIsWeb,
+    );
+    final picked = result?.files.singleOrNull;
+    if (picked == null) return;
+
+    // Check the server's limit before reading the whole file into memory.
+    final max = await widget.controller.maxUploadBytes();
+    if (max != null && picked.size > max) {
+      widget.controller.failure
+        ..value = TooLarge(maxBytes: max)
+        ..refresh();
+      await _clearPickerCopies();
+      return;
+    }
+
+    Uint8List? bytes = picked.bytes;
+    final path = picked.path;
+    if (bytes == null && path != null) bytes = await File(path).readAsBytes();
+    await _clearPickerCopies();
+    if (bytes == null) return;
+
+    await widget.controller.sendFile(
+      widget.conversationId,
+      FileSource(name: picked.name, bytes: bytes, mimeType: _mimeType(picked)),
+    );
+  }
+
+  /// The picker copies files into the app's cache; remove those plaintext
+  /// copies once the bytes are in memory.
+  Future<void> _clearPickerCopies() async {
+    if (kIsWeb) return;
+    try {
+      await FilePicker.platform.clearTemporaryFiles();
+    } catch (_) {
+      // Not supported on every platform.
+    }
+  }
+
+  static String? _mimeType(PlatformFile file) =>
+      switch (file.extension?.toLowerCase()) {
+        'jpg' || 'jpeg' => 'image/jpeg',
+        'png' => 'image/png',
+        'gif' => 'image/gif',
+        'webp' => 'image/webp',
+        'heic' => 'image/heic',
+        'pdf' => 'application/pdf',
+        _ => null,
+      };
+
+  void _send() {
+    final text = widget.inputController.text;
+    widget.inputController.clear();
+    widget.hasText.value = false;
+    // Not awaited: the message shows as "sending" immediately and may take
+    // a while to go out when offline.
+    widget.controller.send(widget.conversationId, text);
   }
 
   String _formatElapsed(Duration d) {
@@ -541,23 +1015,19 @@ class _InputBarState extends State<_InputBar> {
                                   vertical: 10,
                                 ),
                               ),
-                              onChanged: (v) =>
-                                  widget.hasText.value = v.trim().isNotEmpty,
+                              onChanged: (v) {
+                                widget.hasText.value = v.trim().isNotEmpty;
+                                widget.controller.onComposerChanged(
+                                  widget.conversationId,
+                                  v,
+                                );
+                              },
                             ),
                           ),
                           IconButton(
                             icon: const Icon(Icons.attach_file),
                             color: Colors.grey,
-                            onPressed: () {
-                              // File attachment requires backend contracts.
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content:
-                                      Text(widget.l10n.attachmentsRequireApi),
-                                  duration: const Duration(seconds: 2),
-                                ),
-                              );
-                            },
+                            onPressed: _pickAttachment,
                           ),
                         ],
                       ),
@@ -568,13 +1038,12 @@ class _InputBarState extends State<_InputBar> {
               () => widget.hasText.value
                   ? FloatingActionButton.small(
                       elevation: 0,
-                      onPressed: () {
-                        final text = widget.inputController.text;
-                        widget.inputController.clear();
-                        widget.hasText.value = false;
-                        widget.controller.send(widget.conversationId, text);
-                      },
-                      child: const Icon(Icons.send),
+                      onPressed: _send,
+                      child: Icon(
+                        widget.controller.editing.value == null
+                            ? Icons.send
+                            : Icons.check,
+                      ),
                     )
                   : GestureDetector(
                       onLongPressStart: (_) => _startRecording(),
@@ -595,7 +1064,12 @@ class _InputBarState extends State<_InputBar> {
                       },
                       child: FloatingActionButton.small(
                         elevation: 0,
-                        onPressed: () {},
+                        // Recording needs press-and-hold; a tap explains it.
+                        onPressed: () => ScaffoldMessenger.of(context)
+                          ..hideCurrentSnackBar()
+                          ..showSnackBar(
+                            SnackBar(content: Text(widget.l10n.holdToRecord)),
+                          ),
                         backgroundColor: _isRecording
                             ? Theme.of(context).colorScheme.error
                             : null,
@@ -627,7 +1101,7 @@ class _RecordingIndicator extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       child: Row(
         children: [
-          Icon(Icons.fiber_manual_record, color: Colors.red, size: 14),
+          const Icon(Icons.fiber_manual_record, color: Colors.red, size: 14),
           const SizedBox(width: 8),
           Text(elapsedLabel, style: const TextStyle(fontSize: 14)),
           const SizedBox(width: 16),
@@ -652,22 +1126,25 @@ class _RecordingIndicator extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Reply bar
+// Reply / edit bar
 // ---------------------------------------------------------------------------
 
-class _ReplyBar extends StatelessWidget {
-  const _ReplyBar({
-    required this.message,
+class _ComposerContextBar extends StatelessWidget {
+  const _ComposerContextBar({
+    required this.title,
+    required this.body,
     required this.onDismiss,
-    required this.l10n,
+    this.icon,
   });
 
-  final ChatMessage message;
+  final String title;
+  final String body;
+  final IconData? icon;
   final VoidCallback onDismiss;
-  final AppLocalizations l10n;
 
   @override
   Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
     return Container(
       color: Theme.of(context).brightness == Brightness.dark
           ? const Color(0xFF1F2C34)
@@ -675,26 +1152,26 @@ class _ReplyBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
       child: Row(
         children: [
-          Container(
-            width: 3,
-            height: 40,
-            color: Theme.of(context).colorScheme.primary,
-          ),
+          Container(width: 3, height: 40, color: primary),
           const SizedBox(width: 10),
+          if (icon != null) ...[
+            Icon(icon, size: 18, color: primary),
+            const SizedBox(width: 8),
+          ],
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  message.senderDisplayName,
+                  title,
                   style: TextStyle(
-                    color: Theme.of(context).colorScheme.primary,
+                    color: primary,
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
                   ),
                 ),
                 Text(
-                  message.isVoiceNote ? l10n.voiceMessage : message.body,
+                  body,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 13),
@@ -702,10 +1179,7 @@ class _ReplyBar extends StatelessWidget {
               ],
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: onDismiss,
-          ),
+          IconButton(icon: const Icon(Icons.close), onPressed: onDismiss),
         ],
       ),
     );
@@ -746,10 +1220,9 @@ class _DateSeparator extends StatelessWidget {
             _label(context, date, l10n),
             style: TextStyle(
               fontSize: 12,
-              color: Theme.of(context)
-                  .colorScheme
-                  .onSurface
-                  .withValues(alpha: 0.65),
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurface.withValues(alpha: 0.65),
             ),
           ),
         ),
@@ -758,7 +1231,10 @@ class _DateSeparator extends StatelessWidget {
   }
 
   static String _label(
-      BuildContext context, DateTime dt, AppLocalizations l10n) {
+    BuildContext context,
+    DateTime dt,
+    AppLocalizations l10n,
+  ) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final msgDay = DateTime(dt.year, dt.month, dt.day);

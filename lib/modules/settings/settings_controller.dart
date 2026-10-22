@@ -1,9 +1,8 @@
 import 'package:flutter/widgets.dart';
 import 'package:get/get.dart';
 
-import '../../app_routes.dart';
+import '../../domain/chat_backend.dart';
 import '../../models/user.dart';
-import '../../repositories/authentication_repository.dart';
 import '../../services/locale_service.dart';
 
 /// Retention options shown to the user.
@@ -24,9 +23,9 @@ enum RetentionOption {
 }
 
 class SettingsController extends GetxController {
-  SettingsController(this._repository);
+  SettingsController(this._session);
 
-  final AuthenticationRepository _repository;
+  final ChatSession _session;
 
   final currentUser = Rxn<User>();
   final selectedRetention = RetentionOption.thirtyDays.obs;
@@ -44,8 +43,8 @@ class SettingsController extends GetxController {
     _loadCurrentUser();
   }
 
-  Future<void> _loadCurrentUser() async {
-    currentUser.value = await _repository.currentUser();
+  void _loadCurrentUser() {
+    currentUser.value = _session.currentSessionState.user;
   }
 
   void setRetention(RetentionOption option) {
@@ -67,10 +66,14 @@ class SettingsController extends GetxController {
     Get.updateLocale(value);
   }
 
+  /// Deletes this device's local data and keys. The session controller
+  /// returns to the login screen once sign-out has finished.
   Future<void> signOut() async {
     loading.value = true;
-    await _repository.signOut();
-    loading.value = false;
-    Get.offAllNamed(AppRoutes.login);
+    try {
+      await _session.signOut();
+    } finally {
+      loading.value = false;
+    }
   }
 }

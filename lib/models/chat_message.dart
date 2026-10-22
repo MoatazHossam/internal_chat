@@ -1,4 +1,37 @@
-enum MessageDeliveryStatus { pending, sent, delivered, read, failed }
+import '../domain/ids.dart';
+
+/// Matrix has read receipts ("read up to here") but no delivery receipts, so
+/// there is deliberately no "delivered" state.
+enum MessageDeliveryStatus { pending, sent, read, failed }
+
+enum MessageKind {
+  text,
+  image,
+  file,
+  voice,
+  audio,
+
+  /// Removed by its sender or a moderator (a redaction).
+  deleted,
+
+  /// Encrypted, but this device does not have the keys (yet).
+  undecryptable,
+
+  /// A message type this app does not render.
+  unsupported,
+}
+
+class Reaction {
+  const Reaction({
+    required this.key,
+    required this.count,
+    required this.includesMe,
+  });
+
+  final String key;
+  final int count;
+  final bool includesMe;
+}
 
 class ChatMessage {
   const ChatMessage({
@@ -8,62 +41,68 @@ class ChatMessage {
     required this.senderDisplayName,
     required this.body,
     required this.sentAt,
+    this.kind = MessageKind.text,
+    this.isOwn = false,
     this.status = MessageDeliveryStatus.sent,
+    this.localId,
+    this.edited = false,
+    this.canEdit = false,
+    this.canDelete = false,
+    this.reactions = const [],
     this.replyToId,
     this.replyToSenderName,
     this.replyToBody,
+    this.replyToKind,
     this.attachmentName,
     this.attachmentMimeType,
+    this.attachmentSizeBytes,
     this.attachmentDurationMs,
-    this.attachmentLocalPath,
   });
 
+  /// Server event ID, or the local ID while the message is still pending.
   final String id;
-  final String conversationId;
-  final String senderId;
+  final ConversationId conversationId;
+  final UserId senderId;
   final String senderDisplayName;
   final String body;
   final DateTime sentAt;
+  final MessageKind kind;
+  final bool isOwn;
   final MessageDeliveryStatus status;
+
+  /// Set for messages sent from this device.
+  final LocalMessageId? localId;
+  final bool edited;
+  final bool canEdit;
+  final bool canDelete;
+  final List<Reaction> reactions;
+
   final String? replyToId;
   final String? replyToSenderName;
+
+  /// Null when the original message is not loaded on this device.
   final String? replyToBody;
+  final MessageKind? replyToKind;
+
   final String? attachmentName;
   final String? attachmentMimeType;
+  final int? attachmentSizeBytes;
 
-  /// Voice-note duration. Only set when [attachmentMimeType] is an audio type.
+  /// Only set for voice notes and audio.
   final int? attachmentDurationMs;
 
-  /// Local playback source for a mock-recorded voice note. This is a
-  /// mock-only staging field until a real attachment download-URL contract
-  /// exists; it must not be treated as a durable server reference.
-  final String? attachmentLocalPath;
+  MessageRef get ref => MessageRef(conversationId, id);
 
   bool get hasReply => replyToId != null;
-  bool get hasAttachment => attachmentName != null;
-  bool get isVoiceNote => attachmentMimeType?.startsWith('audio/') ?? false;
-
-  ChatMessage copyWith({
-    String? id,
-    MessageDeliveryStatus? status,
-    String? replyToId,
-    String? replyToSenderName,
-    String? replyToBody,
-  }) =>
-      ChatMessage(
-        id: id ?? this.id,
-        conversationId: conversationId,
-        senderId: senderId,
-        senderDisplayName: senderDisplayName,
-        body: body,
-        sentAt: sentAt,
-        status: status ?? this.status,
-        replyToId: replyToId ?? this.replyToId,
-        replyToSenderName: replyToSenderName ?? this.replyToSenderName,
-        replyToBody: replyToBody ?? this.replyToBody,
-        attachmentName: attachmentName,
-        attachmentMimeType: attachmentMimeType,
-        attachmentDurationMs: attachmentDurationMs,
-        attachmentLocalPath: attachmentLocalPath,
-      );
+  bool get hasAttachment => switch (kind) {
+    MessageKind.image ||
+    MessageKind.file ||
+    MessageKind.voice ||
+    MessageKind.audio => true,
+    _ => false,
+  };
+  bool get isVoiceNote =>
+      kind == MessageKind.voice || kind == MessageKind.audio;
+  bool get isPending => status == MessageDeliveryStatus.pending;
+  bool get isFailed => status == MessageDeliveryStatus.failed;
 }

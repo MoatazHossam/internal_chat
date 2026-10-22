@@ -1,129 +1,173 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
-import 'package:internal_chat/models/api_result.dart';
+import 'package:internal_chat/domain/chat_backend.dart';
+import 'package:internal_chat/domain/chat_failure.dart';
+import 'package:internal_chat/domain/ids.dart';
 import 'package:internal_chat/models/chat_message.dart';
-import 'package:internal_chat/models/conversation.dart';
-import 'package:internal_chat/models/page_result.dart';
 import 'package:internal_chat/modules/chat/chat_controller.dart';
-import 'package:internal_chat/repositories/chat_repository.dart';
 
-class ContractChatRepository implements ChatRepository {
-  bool listed = false;
-  bool sent = false;
+import '../support/mock_chat_backend.dart';
 
-  @override
-  Stream<ChatMessage> get incomingMessages => const Stream.empty();
+const _general = ConversationId('!general:demo.invalid');
+const _legacy = ConversationId('!legacy:demo.invalid');
 
-  @override
-  Future<void> initialize() async {}
-
-  @override
-  Future<void> dispose() async {}
-
-  @override
-  Future<ApiResult<PageResult<Conversation>>> conversations(
-    PageRequest request,
-  ) async {
-    listed = true;
-    return const ApiSuccess(
-      PageResult(
-        items: [
-          Conversation(
-              id: 'c', title: 'Through contract', kind: ConversationKind.group),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Future<ApiResult<PageResult<ChatMessage>>> messages(
-    String conversationId,
-    PageRequest request,
-  ) async =>
-      const ApiSuccess(PageResult(items: []));
-
-  @override
-  Future<ApiResult<ChatMessage>> sendMessage({
-    required String conversationId,
-    required String body,
-    required String clientId,
-    String? replyToId,
-    String? replyToSenderName,
-    String? replyToBody,
-    String? attachmentName,
-    String? attachmentMimeType,
-    int? attachmentDurationMs,
-    String? attachmentLocalPath,
-  }) async {
-    sent = true;
-    return ApiSuccess(
-      ChatMessage(
-        id: 'server-id',
-        conversationId: conversationId,
-        senderId: 'current-user',
-        senderDisplayName: 'You',
-        body: body,
-        sentAt: DateTime(2026),
-        attachmentName: attachmentName,
-        attachmentMimeType: attachmentMimeType,
-        attachmentDurationMs: attachmentDurationMs,
-        attachmentLocalPath: attachmentLocalPath,
-      ),
-    );
+/// Lets stream events and zero-length delays run.
+Future<void> settle() async {
+  for (var i = 0; i < 5; i++) {
+    await Future<void>.delayed(Duration.zero);
   }
 }
 
 void main() {
-  test('chat controller lists and sends through repository interface',
-      () async {
-    final repository = ContractChatRepository();
-    final controller = ChatController(repository);
+  late MockChatBackend backend;
+  late ChatController controller;
+
+  setUp(() async {
+    backend = MockChatBackend(
+      latency: Duration.zero,
+      replyDelay: const Duration(hours: 1),
+    );
+    await backend.restore();
+    await backend.signIn(username: 'member', password: 'password');
+    controller = ChatController(
+      backend,
+      backend,
+      backend,
+      isAppInForeground: () => true,
+    );
     controller.onInit();
-
-    await controller.loadConversations();
-
-    expect(repository.listed, isTrue);
-    expect(controller.conversations.single.title, 'Through contract');
-
-    await controller.send('c', 'hello');
-    expect(repository.sent, isTrue);
-    expect(controller.messages.single.id, 'server-id');
-
-    controller.onClose();
+    await settle();
   });
 
-  test('send delegates to repository contract', () async {
-    final repository = ContractChatRepository();
-    final controller = ChatController(repository);
+  tearDown(() => controller.onClose());
 
-    await controller.send('c', 'message');
-    expect(repository.sent, isTrue);
+  test('lists conversations through the Conversations contract', () {
+    expect(controller.loading.value, isFalse);
+    expect(controller.conversations.map((c) => c.title), contains('General'));
+    expect(
+      controller.conversations.first.isInvite,
+      isTrue,
+      reason: 'invites are listed first',
+    );
+  });
+
+  test('opening a conversation loads messages and clears unread', () async {
+    expect(
+      controller.conversations.firstWhere((c) => c.id == _general).unreadCount,
+      greaterThan(0),
+    );
+
+    controller.openConversation(_general);
+    await settle();
+
+    expect(controller.messages, isNotEmpty);
+    expect(
+      controller.conversations.firstWhere((c) => c.id == _general).unreadCount,
+      0,
+    );
+  });
+
+  test('each send gets its own LocalMessageId', () async {
+    controller.openConversation(_general);
+    await settle();
+
+    await controller.send(_general, 'one');
+    await controller.send(_general, 'two');
+    await settle();
+
+    final sent = controller.messages.where((m) => m.isOwn && m.localId != null);
+    expect(sent.map((m) => m.body), containsAll(['one', 'two']));
+    expect(sent.map((m) => m.localId).toSet(), hasLength(2));
+    expect(controller.messages.first.body, 'two');
+  });
+
+  test(
+    'a send into an unencrypted conversation is refused and reported',
+    () async {
+      controller.openConversation(_legacy);
+      await settle();
+      final before = controller.messages.length;
+
+      await controller.send(_legacy, 'secret');
+      await settle();
+
+      expect(controller.failure.value, isA<NotEncryptedRoom>());
+      expect(controller.messages, hasLength(before));
+    },
+  );
+
+  test('editing replaces the body and marks the message edited', () async {
+    controller.openConversation(_general);
+    await settle();
+    await controller.send(_general, 'tpyo');
+    await settle();
+
+    controller.startEditing(controller.messages.first);
+    await controller.send(_general, 'typo');
+    await settle();
+
+    expect(controller.editing.value, isNull);
+    expect(controller.messages.first.body, 'typo');
+    expect(controller.messages.first.edited, isTrue);
+  });
+
+  test('replies carry a reference to the original message', () async {
+    controller.openConversation(_general);
+    await settle();
+    final original = controller.messages.firstWhere((m) => !m.isOwn);
+
+    controller.setReplyTo(original);
+    await controller.send(_general, 'answer');
+    await settle();
+
+    expect(controller.replyTo.value, isNull);
+    expect(controller.messages.first.replyToId, original.id);
+  });
+
+  test('sendVoiceNote sends a voice message through the contract', () async {
+    controller.openConversation(_general);
+    await settle();
+
+    await controller.sendVoiceNote(
+      conversationId: _general,
+      file: FileSource(
+        name: 'voice-message.m4a',
+        bytes: Uint8List.fromList([1, 2, 3]),
+        mimeType: 'audio/mp4',
+      ),
+      duration: const Duration(seconds: 4),
+    );
+    await settle();
+
+    final voice = controller.messages.first;
+    expect(voice.isVoiceNote, isTrue);
+    expect(voice.attachmentDurationMs, 4000);
+    expect(await controller.attachmentBytes(voice), [1, 2, 3]);
   });
 
   test('message search finds matches and navigates between them', () {
-    final repository = ContractChatRepository();
-    final controller = ChatController(repository);
-
     controller.messages.addAll([
       ChatMessage(
         id: 'm3',
-        conversationId: 'c',
-        senderId: 'other',
+        conversationId: _general,
+        senderId: const UserId('@other:demo.invalid'),
         senderDisplayName: 'Other',
         body: 'third apple update',
         sentAt: DateTime(2026, 1, 3),
       ),
       ChatMessage(
         id: 'm2',
-        conversationId: 'c',
-        senderId: 'other',
+        conversationId: _general,
+        senderId: const UserId('@other:demo.invalid'),
         senderDisplayName: 'Other',
         body: 'unrelated message',
         sentAt: DateTime(2026, 1, 2),
       ),
       ChatMessage(
         id: 'm1',
-        conversationId: 'c',
-        senderId: 'other',
+        conversationId: _general,
+        senderId: const UserId('@other:demo.invalid'),
         senderDisplayName: 'Other',
         body: 'first apple mention',
         sentAt: DateTime(2026, 1, 1),
@@ -153,18 +197,7 @@ void main() {
     expect(controller.currentMatchMessageId.value, isNull);
   });
 
-  test('sendVoiceNote attaches audio metadata through the repository',
-      () async {
-    final repository = ContractChatRepository();
-    final controller = ChatController(repository);
-
-    await controller.sendVoiceNote(
-      conversationId: 'c',
-      localPath: '/tmp/voice.m4a',
-      duration: const Duration(seconds: 4),
-    );
-
-    expect(repository.sent, isTrue);
-    expect(controller.messages.single.isVoiceNote, isTrue);
+  test('defaultServer comes from the signed-in user', () {
+    expect(controller.defaultServer, 'demo.invalid');
   });
 }

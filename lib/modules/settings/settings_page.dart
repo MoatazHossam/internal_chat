@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../../app_routes.dart';
 import '../../l10n/app_localizations.dart';
 import '../../widgets/avatar_widget.dart';
 import 'settings_controller.dart';
@@ -47,12 +48,24 @@ class SettingsPage extends GetView<SettingsController> {
             _SectionHeader(label: l10n.account),
             Obx(
               () => ListTile(
-                leading: const Icon(Icons.email_outlined),
-                title: Text(l10n.email),
-                subtitle: Text(
-                  controller.currentUser.value?.email ?? '—',
-                ),
+                leading: const Icon(Icons.alternate_email),
+                title: Text(l10n.userId),
+                subtitle: Text(controller.currentUser.value?.id.value ?? '—'),
               ),
+            ),
+            Obx(
+              () => ListTile(
+                leading: const Icon(Icons.smartphone_outlined),
+                title: Text(l10n.deviceId),
+                subtitle: Text(controller.currentUser.value?.deviceId ?? '—'),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.verified_user_outlined),
+              title: Text(l10n.securityTitle),
+              subtitle: Text(l10n.securitySubtitle),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Get.toNamed(AppRoutes.security),
             ),
 
             const Divider(height: 1),
@@ -81,9 +94,7 @@ class SettingsPage extends GetView<SettingsController> {
                 value: controller.isDarkMode.value,
                 onChanged: (value) {
                   controller.isDarkMode.value = value;
-                  Get.changeThemeMode(
-                    value ? ThemeMode.dark : ThemeMode.light,
-                  );
+                  Get.changeThemeMode(value ? ThemeMode.dark : ThemeMode.light);
                 },
               ),
             ),
@@ -123,11 +134,10 @@ class SettingsPage extends GetView<SettingsController> {
                 l10n.prototypeFooter,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .onSurface
-                          .withValues(alpha: 0.4),
-                    ),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.4),
+                ),
               ),
             ),
             const SizedBox(height: 24),
@@ -149,9 +159,9 @@ class SettingsPage extends GetView<SettingsController> {
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
               child: Text(
                 l10n.retentionSheetTitle,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
               ),
             ),
             Padding(
@@ -159,11 +169,10 @@ class SettingsPage extends GetView<SettingsController> {
               child: Text(
                 l10n.retentionSheetBody,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .onSurface
-                          .withValues(alpha: 0.6),
-                    ),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.6),
+                ),
               ),
             ),
             ...controller.availableRetentionOptions.map(
@@ -201,9 +210,9 @@ class SettingsPage extends GetView<SettingsController> {
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
               child: Text(
                 l10n.language,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
               ),
             ),
             Padding(
@@ -211,11 +220,10 @@ class SettingsPage extends GetView<SettingsController> {
               child: Text(
                 l10n.languageSubtitle,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .onSurface
-                          .withValues(alpha: 0.6),
-                    ),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.6),
+                ),
               ),
             ),
             for (final locale in const [Locale('en'), Locale('ar')])
@@ -287,7 +295,6 @@ class _ProfileHeader extends StatelessWidget {
             () => AvatarWidget(
               name: controller.currentUser.value?.displayName ?? 'U',
               radius: 36,
-              isOnline: true,
             ),
           ),
           const SizedBox(width: 16),
@@ -299,34 +306,16 @@ class _ProfileHeader extends StatelessWidget {
                   Text(
                     controller.currentUser.value?.displayName ?? '—',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    controller.currentUser.value?.email ?? '',
+                    controller.currentUser.value?.id.value ?? '',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withValues(alpha: 0.6),
-                        ),
-                  ),
-                  const SizedBox(height: 4),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF4CAF50).withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      l10n.online,
-                      style: const TextStyle(
-                        color: Color(0xFF4CAF50),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurface.withValues(alpha: 0.6),
                     ),
                   ),
                 ],

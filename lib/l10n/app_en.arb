@@ -1,30 +1,23 @@
 {
   "@@locale": "en",
   "appTitle": "Internal Chat",
-  "loginSubtitle": "Sign in with your organizational account",
-  "emailOrUsername": "Email or username",
+  "loginSubtitle": "Sign in with the account your administrator created for you",
   "password": "Password",
   "signIn": "Sign in",
   "loginFooter": "Access is restricted to authorized personnel.\nContact IT support if you cannot sign in.",
-  "verifySignIn": "Verify sign-in",
-  "twoStepVerification": "Two-step verification",
-  "mfaSubtitle": "Enter the 6-digit code from your approved\nverification channel.",
-  "verify": "Verify",
-  "backToSignIn": "Back to sign-in",
-  "mfaDemoHint": "Demo: use code 123456",
   "searchHint": "Search…",
   "noConversations": "No conversations",
   "noResults": "No results",
-  "newConversationRequiresApi": "New conversation requires the contacts API.",
   "typingLabel": "typing…",
   "settingsTooltip": "Settings",
   "searchTooltip": "Search",
   "newConversationTooltip": "New conversation",
-  "tapForInfo": "tap for info",
   "isTypingSuffix": "{name} is typing…",
   "@isTypingSuffix": {
     "placeholders": {
-      "name": {"type": "String"}
+      "name": {
+        "type": "String"
+      }
     }
   },
   "messageHint": "Message",
@@ -35,13 +28,16 @@
   "searchInConversation": "Search in conversation",
   "today": "Today",
   "yesterday": "Yesterday",
-  "attachmentsRequireApi": "Attachments require the file upload API.",
   "searchMessagesHint": "Search messages…",
   "matchCounter": "{current} of {total}",
   "@matchCounter": {
     "placeholders": {
-      "current": {"type": "int"},
-      "total": {"type": "int"}
+      "current": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
     }
   },
   "noMatches": "No matches",
@@ -50,7 +46,6 @@
   "voiceMessage": "Voice message",
   "settingsTitle": "Settings",
   "account": "Account",
-  "email": "Email",
   "privacyStorage": "Privacy & Storage",
   "deviceHistoryRetention": "Device history retention",
   "appearance": "Appearance",
@@ -63,19 +58,181 @@
   "session": "Session",
   "signOut": "Sign out",
   "signOutConfirmTitle": "Sign out",
-  "signOutConfirmBody": "You will be signed out of this device. Your conversation history will remain on the server.",
+  "signOutConfirmBody": "This device's messages and encryption keys will be deleted from it. To read your encrypted history again later, keep your recovery key or another verified device.",
   "cancel": "Cancel",
   "retentionSheetTitle": "Device history retention",
   "retentionSheetBody": "Messages older than this period are removed from this device. Full history remains available through the Web.",
   "prototypeFooter": "Internal Chat — prototype build\nNot for production use.",
-  "online": "Online",
-  "attachmentsTitle": "Attachments",
-  "noAttachmentsYet": "No attachments yet",
   "retentionSessionOnly": "Session only",
   "retentionOneDay": "1 day",
   "retentionSevenDays": "7 days",
   "retentionThirtyDays": "30 days",
   "retentionNinetyDays": "90 days",
   "retentionSixMonths": "6 months",
-  "retentionOneYear": "1 year"
+  "retentionOneYear": "1 year",
+  "username": "Username",
+  "usernameHint": "name or @name:server",
+  "startingUp": "Opening secure storage…",
+  "retry": "Retry",
+  "errorRateLimited": "Too many attempts. Please wait a moment and try again.",
+  "errorRateLimitedSeconds": "Too many attempts. Try again in {seconds} seconds.",
+  "@errorRateLimitedSeconds": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "errorNotAllowed": "You don't have permission to do that.",
+  "errorInvalidCredentials": "Incorrect username or password.",
+  "errorSessionExpired": "Your session has ended. Please sign in again.",
+  "errorTooLarge": "This file is too large to send.",
+  "errorTooLargeWithLimit": "This file is too large. The limit is {limit}.",
+  "@errorTooLargeWithLimit": {
+    "placeholders": {
+      "limit": {
+        "type": "String"
+      }
+    }
+  },
+  "errorNotEncryptedRoom": "This conversation is not end-to-end encrypted, so messages can't be sent in it.",
+  "errorEncryptionUnavailable": "Encryption is not running on this device, so messages can't be sent.",
+  "errorSecureStorageUnavailable": "Secure storage could not be opened on this device. The app can't continue without it.",
+  "errorOffline": "No connection to the server.",
+  "errorUserNotFound": "That user could not be found.",
+  "errorInvalidRecoveryKey": "That recovery key is not correct.",
+  "errorNotAvailable": "This action is not available right now.",
+  "errorUnexpected": "Something went wrong. Please try again.",
+  "errorInvalidUserId": "Enter a valid user ID, for example {example}.",
+  "@errorInvalidUserId": {
+    "placeholders": {
+      "example": {
+        "type": "String"
+      }
+    }
+  },
+  "newChat": "New chat",
+  "newGroup": "New group",
+  "newChatBody": "Enter the person's user ID. Only people you already share a conversation with can be found by name.",
+  "userIdLabel": "User ID",
+  "start": "Start",
+  "groupNameLabel": "Group name",
+  "groupNameServerVisible": "Group names are visible to the server, unlike messages. Keep them generic.",
+  "groupNameRequired": "Enter a group name.",
+  "membersLabel": "Members",
+  "membersHint": "User IDs, separated by commas",
+  "create": "Create",
+  "invitation": "Invitation",
+  "invitationFrom": "Invitation from {name}",
+  "@invitationFrom": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "accept": "Accept",
+  "decline": "Decline",
+  "offlineBanner": "Offline. Messages will be sent when the connection returns.",
+  "connectingBanner": "Connecting…",
+  "verifyDeviceBanner": "Verify this device to read your earlier encrypted messages.",
+  "setUpRecoveryBanner": "Set up a recovery key to keep access to your encrypted messages.",
+  "notEncryptedBadge": "Not encrypted",
+  "you": "You",
+  "photo": "Photo",
+  "file": "File",
+  "document": "Document",
+  "deletedMessage": "This message was deleted",
+  "encryptedMessage": "Encrypted message",
+  "unsupportedMessage": "Unsupported message",
+  "waitingForKeys": "Waiting for this message's encryption keys",
+  "encryptedSubtitle": "End-to-end encrypted",
+  "notEncryptedComposer": "Sending is disabled because this conversation is not end-to-end encrypted.",
+  "edit": "Edit",
+  "edited": "edited",
+  "editingMessage": "Editing message",
+  "delete": "Delete",
+  "deleteConfirmTitle": "Delete message?",
+  "deleteConfirmBody": "The message is removed for everyone. Copies already saved on devices, in backups or in downloads may remain.",
+  "originalMessage": "Original message",
+  "originalMessageUnavailable": "Message not loaded",
+  "fileSaved": "File saved",
+  "leaveConversation": "Leave conversation",
+  "leaveConfirmBody": "You will stop receiving messages from this conversation.",
+  "membersTitle": "{count, plural, =1{1 member} other{{count} members}}",
+  "@membersTitle": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "addMember": "Add member",
+  "removeMember": "Remove",
+  "removeMemberConfirm": "Remove {name} from this conversation?",
+  "@removeMemberConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "roleAdmin": "Admin",
+  "roleModerator": "Moderator",
+  "invited": "Invited",
+  "encryptionInfo": "Messages in this conversation are end-to-end encrypted.",
+  "userId": "User ID",
+  "deviceId": "Device ID",
+  "deviceIdValue": "Device ID: {id}",
+  "@deviceIdValue": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "securityTitle": "Security & verification",
+  "securitySubtitle": "Recovery key and device verification",
+  "trustVerified": "This device is verified",
+  "trustVerifiedBody": "It can read your encrypted history, and your other devices trust it.",
+  "trustUnverified": "This device is not verified",
+  "trustUnverifiedBody": "Verify it with another signed-in device, or enter your recovery key, to read earlier encrypted messages.",
+  "trustNeedsSetup": "No recovery key yet",
+  "trustNeedsSetupBody": "Set up a recovery key so you can read your encrypted history on new devices.",
+  "trustUnavailable": "Encryption is not available",
+  "trustUnknown": "Checking this device…",
+  "verifyWithOtherDevice": "Verify with another device",
+  "enterRecoveryKey": "Enter recovery key",
+  "enterRecoveryKeyBody": "Enter the recovery key you saved when you set up encryption.",
+  "setUpRecovery": "Set up recovery key",
+  "historyLossWarning": "If you lose every signed-in device and your recovery key, your encrypted message history cannot be recovered: not from server backups, and not by resetting your password.",
+  "confirmPasswordTitle": "Confirm your password",
+  "confirmPasswordBody": "The server asks for your password before it stores your new encryption keys.",
+  "recoveryKeyTitle": "Your recovery key",
+  "recoveryKeyBody": "Store it somewhere safe, such as a password manager. It is shown only once. Anyone with this key can read your encrypted history.",
+  "recoveryKeyLabel": "Recovery key",
+  "copy": "Copy",
+  "iSavedIt": "I've saved it",
+  "restore": "Restore",
+  "restoreSuccess": "Recovery key accepted. Earlier messages are being restored.",
+  "verificationTitle": "Verify device",
+  "verificationIncomingSelf": "Another of your devices wants to verify this one.",
+  "verificationIncomingUser": "{user} wants to verify with you.",
+  "@verificationIncomingUser": {
+    "placeholders": {
+      "user": {
+        "type": "String"
+      }
+    }
+  },
+  "verificationWaiting": "Waiting for the other device…",
+  "verificationCompare": "Check that the same emojis appear in the same order on the other device.",
+  "theyMatch": "They match",
+  "theyDontMatch": "They don't match",
+  "verificationDone": "Verified. This device is now trusted.",
+  "verificationCancelled": "Verification was cancelled.",
+  "close": "Close",
+  "errorUnsupportedPlatform": "This app can't run in a web browser yet: end-to-end encryption is not available there. Use the iOS or Android app.",
+  "trustUnverifiedNoKeyBody": "Your account's encryption was set up on another device (for example Element) without a recovery key. Open that device and verify this one with emojis. Until then, other people's devices will not share message keys with this device.",
+  "holdToRecord": "Hold to record, release to send. Slide left to cancel."
 }

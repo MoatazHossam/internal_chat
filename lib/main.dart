@@ -4,6 +4,7 @@ import 'package:get_storage/get_storage.dart';
 
 import 'app_pages.dart';
 import 'app_routes.dart';
+import 'constants.dart';
 import 'l10n/app_localizations.dart';
 import 'modules/app_binding.dart';
 import 'services/locale_service.dart';
@@ -12,11 +13,13 @@ import 'styles/app_theme.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await GetStorage.init();
-  runApp(const InternalChatApp());
+  runApp(InternalChatApp(configuration: AppConfiguration.fromEnvironment()));
 }
 
 class InternalChatApp extends StatelessWidget {
-  const InternalChatApp({super.key});
+  const InternalChatApp({super.key, required this.configuration});
+
+  final AppConfiguration configuration;
 
   @override
   Widget build(BuildContext context) {
@@ -29,8 +32,8 @@ class InternalChatApp extends StatelessWidget {
       locale: LocaleService.current(),
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
-      initialBinding: AppBinding(),
-      initialRoute: AppRoutes.login,
+      initialBinding: AppBinding(configuration),
+      initialRoute: AppRoutes.splash,
       getPages: AppPages.pages,
     );
   }
