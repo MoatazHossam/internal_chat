@@ -1,34 +1,36 @@
+import 'package:flutter/widgets.dart';
 import 'package:get/get.dart';
 
-import '../../app_routes.dart';
+import '../../domain/chat_backend.dart';
 import '../../models/user.dart';
-import '../../repositories/authentication_repository.dart';
+import '../../services/locale_service.dart';
 
 /// Retention options shown to the user.
-/// Values match the list in the README.
+/// Values match the list in the README. Display labels are localized in
+/// the page, keeping this controller free of UI/localization concerns.
 enum RetentionOption {
-  sessionOnly(0, 'Session only'),
-  oneDay(1, '1 day'),
-  sevenDays(7, '7 days'),
-  thirtyDays(30, '30 days'),
-  ninetyDays(90, '90 days'),
-  oneEightyDays(180, '6 months'),
-  oneYear(365, '1 year');
+  sessionOnly(0),
+  oneDay(1),
+  sevenDays(7),
+  thirtyDays(30),
+  ninetyDays(90),
+  oneEightyDays(180),
+  oneYear(365);
 
-  const RetentionOption(this.days, this.label);
+  const RetentionOption(this.days);
 
   final int days;
-  final String label;
 }
 
 class SettingsController extends GetxController {
-  SettingsController(this._repository);
+  SettingsController(this._session);
 
-  final AuthenticationRepository _repository;
+  final ChatSession _session;
 
   final currentUser = Rxn<User>();
   final selectedRetention = RetentionOption.thirtyDays.obs;
   final isDarkMode = false.obs;
+  final locale = Rx<Locale>(LocaleService.current());
   final loading = false.obs;
 
   // The administrator maximum is mocked at 365 days.
@@ -41,8 +43,8 @@ class SettingsController extends GetxController {
     _loadCurrentUser();
   }
 
-  Future<void> _loadCurrentUser() async {
-    currentUser.value = await _repository.currentUser();
+  void _loadCurrentUser() {
+    currentUser.value = _session.currentSessionState.user;
   }
 
   void setRetention(RetentionOption option) {
@@ -57,10 +59,21 @@ class SettingsController extends GetxController {
         .toList();
   }
 
+  Future<void> setLocale(Locale value) async {
+    if (locale.value == value) return;
+    locale.value = value;
+    await LocaleService.set(value);
+    Get.updateLocale(value);
+  }
+
+  /// Deletes this device's local data and keys. The session controller
+  /// returns to the login screen once sign-out has finished.
   Future<void> signOut() async {
     loading.value = true;
-    await _repository.signOut();
-    loading.value = false;
-    Get.offAllNamed(AppRoutes.login);
+    try {
+      await _session.signOut();
+    } finally {
+      loading.value = false;
+    }
   }
 }

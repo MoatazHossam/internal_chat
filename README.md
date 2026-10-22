@@ -2,7 +2,7 @@
 
 A security-first internal messaging application for organizational use, built with Flutter for iOS, Android, and Web.
 
-The application provides a familiar WhatsApp-style experience while enforcing organizational authentication, device-management, retention, auditing, and data-protection requirements.
+The application provides a familiar WhatsApp-style experience on top of an end-to-end encrypted [Matrix](https://spec.matrix.org/latest/client-server-api/) homeserver operated by the organization.
 
 > This project is currently a prototype and must not be treated as production-ready.
 
@@ -14,7 +14,7 @@ Current development state:
 * `contract-first`: Rejected experimental refactor. Do not merge or use as a development base.
 * `foundation/contract-first-v2`: Corrective incremental architecture branch based on `main`.
 
-The active objective is to introduce contract-first architecture without replacing or degrading the existing UI.
+The backend is now a Matrix homeserver (Synapse). The earlier custom REST/SignalR API is **not** the contract: the app speaks the standard Matrix Client-Server API through an SDK, behind replaceable domain interfaces. The source for the server facts below is the Flutter handover from the backend team (2026-10-19); see also [`docs/matrix_integration.md`](docs/matrix_integration.md).
 
 ## Core Principles
 
@@ -31,69 +31,71 @@ The active objective is to introduce contract-first architecture without replaci
 
 The application targets:
 
-* iOS
-* Android
-* Web
+* iOS: Matrix backend.
+* Android: Matrix backend.
+* Web: **not supported yet.** `flutter_vodozemac` has no web build, so end-to-end encryption on the web needs a separate vodozemac WASM pipeline. Until that exists, web builds stop at the start screen with an explanation. The app shows no demo or sample data on any platform.
 
 Desktop Flutter platforms are not currently part of the approved production scope.
+
+## Licence (decision pending)
+
+The Matrix SDK (`matrix`) and its encryption bindings (`flutter_vodozemac`) are **AGPL-3.0**. Linking them generally means the app must be distributed under AGPL-compatible terms, with source offered to the people who receive it.
+
+* Status: **accepted for the POC only (2026-10-20); legal review still required** before distributing builds beyond the POC.
+* If AGPL is not acceptable, the options are a commercial licence from Famedly (not verified) or a Dart bridge to `matrix-rust-sdk` (Apache-2.0). Only `lib/data/matrix/` would change.
+
+This conflicts with the "Proprietary" statement in the [License](#license) section until legal decides.
 
 ## Technology Direction
 
 ### Mobile and Web
 
-* Flutter
-* Dart
+* Flutter and Dart
 * GetX for state management, dependency injection, and routing
-* `http` package for REST communication
-* SignalR for realtime messaging
-* `flutter_secure_storage` for mobile secrets
-* Encrypted local storage technology to be finalized with the security team
-* APNS and FCM for generic push notifications
+* Famedly `matrix` SDK (14.x, pure Dart) for the Matrix Client-Server API
+* `flutter_vodozemac` (0.8.x) for Olm/Megolm end-to-end encryption. Keep 0.8.x until `matrix` depends on `vodozemac` 0.9.
+* SQLCipher (through `package:sqlite3` build hooks and `sqflite_common_ffi`) for the encrypted local store
+* `flutter_secure_storage` for the database key (Keychain on iOS, Keystore on Android)
 
 ### Backend
 
-The backend will be discussed and implemented separately.
-
-Current backend direction:
-
-* ASP.NET/.NET
-* Windows Servers
-* SignalR
-* Active Directory authentication
-* Mandatory MFA
-* JWT access tokens
-* Oracle Database for all server-side persistent data
-* Fully on-premises deployment
-* Public-internet access through approved security infrastructure
-
-Matrix is not part of the current architecture.
+| Topic | Value |
+|---|---|
+| Homeserver | `https://secure-chat-poc.duckdns.org`, discovered through `/.well-known/matrix/client` |
+| Software | Synapse 1.163; Matrix spec v1.1–v1.15 |
+| Sign-in | `m.login.password` only. No SSO, OIDC, MFA, or registration; an administrator creates accounts |
+| Sync | Classic `/v3/sync` long-polling |
+| Rooms | Encrypted by default (Megolm), invite-only, no public directory |
+| Federation | Disabled |
+| User search | Only users who already share a room; a first chat needs the full Matrix ID |
+| Presence | Disabled |
+| URL previews | Disabled |
+| Media | Authenticated media only (`/_matrix/client/v1/media`). Upload limit read at runtime from `/v1/media/config` (25 MiB on the POC) |
+| Rate limits | `429 M_LIMIT_EXCEEDED` with `retry_after_ms` |
+| Push | Requires a push gateway the organization controls; not deployed yet |
 
 ## Functional Scope
 
-The target application supports WhatsApp-like internal messaging without voice or video calls.
+Implemented on the Matrix backend:
 
-Expected capabilities include:
-
-* Direct conversations
-* Group conversations
-* Text messages
-* Images
-* Documents and file attachments
-* Voice notes
-* Message replies
-* Delivery status
-* Read receipts
-* Unread-message counts
+* Direct conversations (encrypted, reusing an existing encrypted DM)
+* Group conversations (encrypted, invite-only), add and remove members, leave
+* Accepting and declining invitations
+* Text messages, replies, edits, deletions (redactions), reactions
+* Images and documents (encrypted client-side before upload)
+* Voice notes (MSC3245 voice markers, as Element sends them)
+* Read receipts and unread counts
 * Typing indicators
-* Presence information where permitted
-* Conversation and message search
-* Offline message queue
-* Reconnection and missed-message recovery
-* Generic push notifications
-* Device-history retention settings
-* Full authorized history through Web
+* In-conversation message search (loaded messages)
+* Offline sending with idempotent retry
+* Device verification (emoji/SAS), recovery key, and online key backup
 
-Final approval of individual features remains subject to business and security review.
+Not available or not applicable:
+
+* **Delivery receipts:** Matrix has none; the app shows read receipts only.
+* **Presence/online status:** disabled on the server; the app shows none.
+* **Push notifications:** need a push gateway (see below).
+* **Full plaintext server history:** see [Server History](#server-history).
 
 ## Explicitly Excluded
 
@@ -116,7 +118,7 @@ This includes:
 
 * Familiar conversation-list layout
 * Familiar message bubbles
-* Clear sent, delivered, read, pending, and failed states
+* Clear sending, sent, read, and failed states (Matrix has no delivery receipts, so there is no "delivered" tick)
 * Familiar attachment actions
 * Predictable navigation
 * Responsive layouts for mobile and Web
@@ -126,35 +128,43 @@ This includes:
 
 The application must not copy WhatsApp branding, copyrighted assets, or trademarks.
 
-## Target Flutter Structure
+## Flutter Structure
 
 ```text
 lib/
-├── models/
+├── domain/                 # Backend contracts. Pure Dart, no SDK imports.
+│   ├── chat_backend.dart   # ChatSession, Conversations, Messages, DeviceTrust
+│   ├── chat_failure.dart   # Errors that cross the boundary
+│   ├── ids.dart            # ConversationId, UserId, LocalMessageId, MessageRef
+│   ├── send_guard.dart     # Refuse to send without encryption
+│   ├── session_state.dart
+│   └── device_trust_state.dart
+├── models/                 # Domain models: Conversation, ChatMessage, User
+├── data/
+│   ├── backend_factory.dart        # Composition root for the backend
+│   ├── matrix/                     # The ONLY code that imports the Matrix SDK
+│   │   ├── matrix_chat_backend.dart
+│   │   ├── matrix_mappers.dart     # SDK events/rooms -> domain models
+│   │   ├── matrix_errors.dart      # SDK/network errors -> ChatFailure
+│   │   ├── matrix_store.dart       # SQLCipher store, key in secure storage
+│   │   └── matrix_verification.dart
+│   └── unsupported_platform_backend.dart  # Web: explains it is not supported
 ├── modules/
+│   ├── app_binding.dart    # Registers the backend under each contract
+│   ├── session/            # Startup, routing on session changes
 │   ├── authentication/
-│   │   ├── authentication_binding.dart
-│   │   ├── authentication_controller.dart
-│   │   └── authentication_page.dart
-│   ├── conversations/
 │   ├── chat/
-│   ├── files/
+│   ├── security/           # Recovery key, verification
 │   └── settings/
-├── repositories/
 ├── services/
 ├── styles/
 ├── utilities/
-├── web_services/
-│   ├── dtos/
-│   └── mappers/
 ├── widgets/
 ├── app_pages.dart
 ├── app_routes.dart
-├── constants.dart
+├── constants.dart          # Build-time configuration
 └── main.dart
 ```
-
-This is a target structure. Existing code must be migrated incrementally rather than replaced through a large rewrite.
 
 ## Module Convention
 
@@ -169,355 +179,103 @@ Large reusable widgets belong in `widgets/`.
 
 Controllers must not:
 
-* Call HTTP directly
+* Import the Matrix SDK or any other transport
 * Parse JSON
 * Access secure storage directly
 * Contain mock data
-* Connect directly to SignalR
-* Execute local-database queries
-* Know whether the application is using mock or real services
+* Know which backend implementation is behind the contracts
 
 ## Application Data Flow
 
 ```text
 Page or Widget
     → Controller
-        → Repository Interface
-            → Remote Web Service
-            → Realtime Service
-            → Local Storage Service
-            → Offline Outbox
+        → Domain contract (ChatSession / Conversations / Messages / DeviceTrust)
+            → MatrixChatBackend (data/matrix, Matrix SDK)
+            → or a test fixture (test/support) in unit tests
 ```
 
-Responsibilities must remain separated.
+* **Pages and widgets** render state, collect input, and navigate.
+* **Controllers** hold screen state, call domain contracts, and expose `ChatFailure`s for the UI to localize.
+* **The Matrix adapter** owns the SDK client, maps SDK events to domain models, enforces the security rules below, and translates every SDK or network error into a `ChatFailure`.
+* **The SDK's persistent store** owns the sync cursor (`next_batch`), device keys, room keys, and the access token. The app does not duplicate them.
 
-### Pages and Widgets
+## Contracts and Test Fixtures
 
-Responsible for:
+The Matrix adapter implements the `ChatBackend` contracts. Tests use an in-memory fixture (`test/support/mock_chat_backend.dart`) that implements the same contracts, so controller tests run through the real interfaces. The app itself contains no mock backend or sample conversations.
 
-* Rendering state
-* Collecting user input
-* Triggering controller actions
-* Navigation and presentation
+Pages, widgets, controller method signatures, navigation, and UI state models must not depend on which implementation is behind the contracts. Replacing the SDK (for example with a `matrix-rust-sdk` bridge) must only touch `lib/data/matrix/` and `lib/data/backend_factory.dart`.
 
-### Controllers
+## Domain Models
 
-Responsible for:
+Domain models (`Conversation`, `ChatMessage`, `User`, `Member`) do not depend on SDK types. SDK events are mapped in `data/matrix/matrix_mappers.dart`:
 
-* Screen state
-* User actions
-* Calling repository contracts
-* Presenting domain results to the UI
+* Message kinds: text, image, file, voice, audio.
+* Redacted messages become "deleted" items.
+* Events this device cannot decrypt become "waiting for keys" items. The SDK's decryption error text is never shown.
+* Unknown event types become "unsupported message" items rather than crashing.
+* State events, reactions, edits, and verification events are folded into other items or hidden.
 
-### Repositories
+## Security Rules the App Enforces
 
-Responsible for:
+The server encrypts new rooms by default but **does not enforce encryption**. The app therefore:
 
-* Coordinating remote and local sources
-* Realtime reconciliation
-* Offline behaviour
-* Deduplication
-* Mapping infrastructure results to domain models
+1. Creates every room with an explicit `m.room.encryption` (`m.megolm.v1.aes-sha2`) in `initial_state`, and never reuses an old unencrypted DM.
+2. **Refuses to send** (messages, files, voice notes, reactions, edits) into any room that is not encrypted, or when encryption is not running on the device. The composer is replaced by an explanation; there is no plaintext fallback.
+3. Treats room names and topics as server-visible and tells users to keep group names generic.
+4. Stores the local database encrypted with SQLCipher. The key lives in Keychain/Keystore. If either is unavailable, the app stops at the start screen instead of falling back to plaintext.
+5. Never logs access tokens, message bodies, or keys (SDK log level is `error`).
 
-### Web Services
+## Sign-in and Sessions
 
-Responsible only for transport concerns:
+* Password sign-in only (`m.login.password`). The app offers no sign-up.
+* Each sign-in creates a new device with its own encryption keys.
+* The app requests refresh tokens; the SDK renews access tokens automatically.
+* If the server ends the session (`M_UNKNOWN_TOKEN`), the user returns to the login screen with an explanation.
+* Sign-out tells the server, deletes the local store and its key, and returns to the login screen.
 
-* HTTP method and URL
-* Headers
-* Request encoding
-* Response decoding
-* Timeouts
-* Network cancellation
-* Status codes
-* Safe error translation
+## Devices, Verification, and Recovery
 
-### Services
-
-Responsible for infrastructure capabilities such as:
-
-* Token storage
-* Local encrypted history
-* Offline outbox
-* Connectivity
-* SignalR
-* Device-retention cleanup
-* Session handling
-
-## Required Repository Contracts
-
-The application should define stable interfaces for:
-
-* `AuthenticationRepository`
-* `ChatRepository`
-* `FileRepository`
-
-Controllers depend on these interfaces, never directly on mock or REST implementations.
-
-## Required Service Contracts
-
-The application should define stable interfaces for:
-
-* `RealtimeService`
-* `TokenStorageService`
-* `LocalChatStorageService`
-* `OutboxService`
-* `ConnectivityService`
-* `RetentionService`
-* `SessionService`
-
-These interfaces must be designed so implementations can be replaced without changing controllers.
-
-## Mock-to-Real Integration Rule
-
-Mock and real implementations must implement identical interfaces.
-
-For example:
-
-```text
-ChatController
-    → ChatRepository
-        → MockChatRepository
-```
-
-Later:
-
-```text
-ChatController
-    → ChatRepository
-        → RestChatRepository
-            → ChatWebService
-            → SignalRService
-            → LocalChatStorageService
-```
-
-Changing from mock to real mode should happen only in GetX dependency bindings or application composition.
-
-It must not require changes to:
-
-* Pages
-* Widgets
-* Controller method signatures
-* Navigation
-* UI state models
-
-## Domain Models and DTOs
-
-Domain models represent application concepts and must not depend directly on backend JSON.
-
-Examples:
-
-* User
-* Authentication session
-* Conversation
-* Participant
-* Chat message
-* Attachment
-* Delivery receipt
-* Read receipt
-* Retention policy
-* Outbox item
-
-Backend DTOs belong under `web_services/dtos/`.
-
-DTO-to-domain mapping belongs under `web_services/mappers/` or inside the real repository implementation.
-
-Backend field names must not leak into UI code.
-
-No DTO should be finalized until the backend team provides an approved API contract.
-
-## REST, SignalR, and Push Responsibilities
-
-### REST APIs
-
-REST APIs are used for:
-
-* Authentication
-* MFA
-* Session refresh
-* Conversation lists
-* Message history
-* Sending messages
-* Uploading and downloading attachments
-* Search
-* Read and delivery acknowledgements
-* Retention preferences
-* Recovery after disconnection
-* Missed-event reconciliation
-
-### SignalR
-
-SignalR is used for:
-
-* Incoming messages
-* Conversation updates
-* Delivery receipts
-* Read receipts
-* Typing indicators
-* Presence updates
-* Message edits or deletions
-* Realtime policy changes where required
-
-SignalR is not the source of truth. Oracle-backed backend services remain authoritative.
-
-### Push Notifications
-
-APNS and FCM are used when the application is suspended or terminated.
-
-Push content must be generic. It must not contain:
-
-* Message content
-* Attachment names
-* Sensitive sender details
-* Authentication tokens
-* Internal identifiers that are unnecessary for routing
-
-A notification may tell the application that new activity exists. After authentication, the application retrieves the real data from the backend.
-
-## Reconnection and Recovery
-
-When the app is reopened or SignalR reconnects:
-
-1. Validate or restore the authenticated session.
-2. Reconnect SignalR.
-3. Request missed messages or events using a cursor or sequence value.
-4. Reconcile the local outbox.
-5. Deduplicate messages using server and client message identifiers.
-6. Refresh delivery and read states.
-7. Update the conversation list.
-
-The application must never assume SignalR delivered every event.
-
-## Offline Messaging
-
-Every outgoing message must have a unique client-generated idempotency identifier.
-
-Offline states include:
-
-* Pending
-* Sending
-* Sent
-* Delivered
-* Read
-* Retryable failure
-* Permanent failure
-
-The outbox contract must support:
-
-* Enqueue
-* Update
-* Retry
-* Remove
-* Retry count
-* Creation time
-* Last-attempt time
-* Idempotency/client message ID
-* Permanent-versus-retryable failure classification
-
-A queued local message must not be shown as successfully accepted by the server.
-
-## Message Deduplication
-
-Messages can arrive through:
-
-* REST send acknowledgement
-* SignalR
-* History synchronization
-* Offline recovery
-
-The repository must merge these using:
-
-1. Server message ID
-2. Client message ID
-3. Conversation ID
-
-Controllers must not implement deduplication independently.
-
-Incoming messages must always be filtered by conversation ID before appearing in an open conversation.
-
-## Authentication
-
-Authentication requirements:
-
-* Active Directory is the identity source.
-* MFA is mandatory.
-* The backend issues JWT access tokens.
-* Token refresh and revocation behaviour must be formally defined.
-* Authentication errors must not expose sensitive infrastructure information.
-* Concurrent unauthorized responses must trigger only one logout flow.
-* Logout must clear tokens, sensitive cache, realtime connections, and protected local data as required.
-
-### Mobile Token Storage
-
-On iOS and Android:
-
-* Store tokens using `flutter_secure_storage`.
-* Use Keychain/Keystore-backed protection.
-* Never use `GetStorage`, SharedPreferences, or plain files for tokens.
-* Replacing a token set must delete obsolete refresh tokens.
-
-### Web Session Storage
-
-For Web:
-
-* Access tokens should remain memory-only.
-* Do not store tokens in local storage, session storage, IndexedDB, or `GetStorage`.
-* The preferred refresh-session approach is an approved `HttpOnly`, `Secure`, and appropriate `SameSite` cookie managed by the backend.
-* The final Web session strategy requires backend and security approval.
+* **Recovery key:** set up once per account from *Settings → Security & verification*. It creates cross-signing keys, secret storage (SSSS), and the online key backup. The server re-checks the password first. The key is shown once.
+* **New devices** become trusted by entering the recovery key, or by emoji (SAS) verification with another signed-in device (including Element). Incoming verification requests open a dialog anywhere in the app.
+* **Restoring history:** after the recovery key is accepted (or verification completes), the app loads earlier room keys from the online backup.
+* An existing identity (for example one created from Element) is never wiped by the app.
+* **Losing every device and the recovery key means losing encrypted history.** Server backups and password resets cannot recover it. The app says this on the security page.
 
 ## Server History
 
-The server must retain complete authorized chat history in Oracle.
+The previous plan required the server to provide complete plaintext history to authenticated Web users. With end-to-end encryption the server cannot do that: it stores ciphertext only. A device reads earlier messages only through the recovery key / key backup or verification with another device.
 
-Users must be able to view their complete server history through the Web application after successful AD and MFA authentication.
+This changes the original requirement and needs an organizational decision (see [Open Decisions](#open-decisions)).
 
-The system must enforce:
+## Offline Messaging and Deduplication
 
-* Conversation membership authorization
-* User-level history access
-* Pagination
-* Audit logging
-* Rate limits
-* Session validation
-* Protection against identifier enumeration
+* Every send creates one `LocalMessageId` per user action. The adapter uses it as the Matrix transaction ID (`PUT /rooms/{roomId}/send/{type}/{txnId}`), so every retry reuses it and the server returns the same event instead of a duplicate.
+* Pending messages are kept as local echoes in the SDK's encrypted store and shown as "sending" until the server accepts them.
+* While offline the SDK keeps retrying for two minutes; after that the message is marked failed. When the connection returns, failed messages in open conversations are retried automatically (once per app run); any failed message can be retried by tapping it.
+* A queued message is never shown as accepted by the server.
+* Failed **attachments** cannot be retried, because decrypted files are not kept on disk; the user picks the file again.
 
-Normal database access should not expose plaintext messages unnecessarily. Encryption, key-management, HSM/KMS usage, and privileged administrator access require security-team approval.
+## Push Notifications (needs new infrastructure)
 
-This is not traditional device-only end-to-end encryption because the server must provide full history to authenticated users.
+Not implemented. The stock Element apps use Element's own push gateway and credentials, which another app cannot use. `internal_chat` needs:
+
+1. Its own Firebase project (FCM) and APNs key.
+2. A push gateway the organization controls, for example Sygnal (Apache-2.0). This expands the server stack and **needs owner approval**.
+3. Pusher registration with `format: event_id_only`, then fetching and decrypting the event on the device.
+
+Lock-screen text must stay generic (for example "New message"): no content or sender.
 
 ## Device Retention
 
-Server retention and device retention are separate.
+Device retention is out of scope of the Matrix handover. The retention picker in Settings is still a UI-only preference and is **not enforced** yet.
 
-### Server
+Earlier requirements still apply for the eventual design:
 
-* Keeps complete authorized history.
-* Oracle remains the authoritative source.
-* Server retention changes require organizational approval.
-
-### Device
-
-Users may select a local-history period, limited by administrator policy.
-
-Initial options:
-
-* Session only / no persistent local history
-* 1 day
-* 7 days
-* 30 days
-* 90 days
-* 180 days
-* 365 days
-
-Rules:
-
-* The administrator can reduce the maximum.
-* The user cannot exceed the administrator maximum.
-* Policy validation must work in release builds and must not rely only on Dart `assert`.
-* Expired messages and attachments must be securely removed from the local application database and cache.
-* Web history remains available from the server after authentication.
-* Retention-policy changes must trigger local cleanup.
-* Logout, revocation, remote wipe, or device non-compliance may trigger additional cleanup.
+* Session only / no persistent local history, 1, 7, 30, 90, 180, or 365 days.
+* The administrator can reduce the maximum; the user cannot exceed it.
+* Policy validation must work in release builds and must not rely on Dart `assert`.
+* Expired messages and attachments must be removed from the local store.
 
 ## VIP and Sensitive Data
 
@@ -560,63 +318,26 @@ MDM improves device control but does not replace application security.
 
 ## Network Security
 
-The application is reachable through the public internet while backend infrastructure remains on-premises.
-
-Required controls include:
-
-* HTTPS only outside explicit local development
-* Approved TLS versions and cipher suites
-* Valid trusted certificates
-* No production certificate bypass
-* Reverse proxy, gateway, or WAF as approved
-* Authentication rate limiting
-* Request-size limits
-* Safe timeout and retry policies
-* Correlation identifiers without sensitive content
-* Certificate pinning or enterprise-CA policy to be decided with security
-* Optional mTLS to be evaluated
-
-Production builds must reject insecure HTTP API URLs.
+* HTTPS only. `MATRIX_HOMESERVER` must use `https`; plain HTTP is allowed only for `localhost` in debug builds.
+* Valid trusted certificates; no certificate bypass.
+* Certificate pinning or an enterprise-CA policy is still to be decided with security.
+* Rate limits are respected (`retry_after_ms` is surfaced to the user).
 
 ## Local Data Security
 
-Local chat history must use encrypted storage.
-
-The final local-database technology must support:
-
-* Encryption at rest
-* Key storage outside the database
-* Per-user data separation
-* Retention deletion
-* Attachment-cache deletion
-* Schema migration
-* Transaction safety
-* Offline outbox persistence
-* Corruption recovery
-* Logout cleanup
-
-The database encryption key must be protected through Keychain or Keystore-backed mechanisms.
+* The SDK store (messages, room keys, device keys, sync cursor, access token) is an SQLCipher database. Its 256-bit key is generated on the device and stored with `flutter_secure_storage` (Keychain `first_unlock_this_device`; Android Keystore).
+* Decrypted attachments are held in memory only. The SDK's file cache is disabled because it writes decrypted files to disk.
+* Voice notes are written to a temporary file for playback and deleted when the player closes. Recordings and files chosen with the picker are deleted after they are read.
+* Android backups and device-to-device transfer are disabled for app data.
+* Sign-out deletes the database files and the key.
 
 ## Attachment Security
 
-Attachments must be treated as untrusted content.
-
-Required backend and client controls include:
-
-* File-size limits
-* Approved MIME types
-* File-signature validation
-* Malware scanning
-* Upload cancellation and resumption
-* Checksums
-* Authorization before download
-* Short-lived download authorization
-* Secure temporary storage
-* Local-retention cleanup
-* Safe preview behaviour
-* Filename sanitization
-
-The organization will provide or approve the malware-scanning capability.
+* Files are encrypted client-side (AES-256-CTR) before upload; thumbnails are separate encrypted uploads.
+* The upload limit comes from the server (`/v1/media/config`) and is checked before the file is read into memory.
+* Downloads use the authenticated `/_matrix/client/v1/media/download` endpoints.
+* **There is no server-side malware scanning.** The app does not claim otherwise.
+* Saving a file to the device creates a copy outside the app's control.
 
 ## Logging and Telemetry
 
@@ -645,144 +366,29 @@ Crash reports must be reviewed for possible sensitive-data exposure.
 
 ## Configuration
 
-Environment configuration may contain:
+Build-time values from `--dart-define`:
 
-* Application environment
-* API base URL
-* SignalR hub URL
-* Feature flags
-* Mock-versus-real implementation selection
-
-Configuration must not contain:
-
-* Passwords
-* Client secrets
-* Private keys
-* Production tokens
-* Encryption keys
-
-Example development command:
-
-```bash
-flutter run \
-  --dart-define=APP_ENV=mock \
-  --dart-define=API_BASE_URL=https://example.invalid
-```
+| Name | Default | Purpose |
+|---|---|---|
+| `MATRIX_HOMESERVER` | `https://secure-chat-poc.duckdns.org` | Homeserver base URL; must be `https` |
 
 Values supplied through `dart-define` are compiled into the application and must not be treated as secrets.
-
-## Backend Contracts Required
-
-Before implementing real integrations, the backend team must provide:
-
-### Authentication
-
-* Login method and endpoint
-* AD integration behaviour
-* MFA challenge and verification
-* Access-token response
-* Token-refresh response
-* Expiry and clock-skew rules
-* Revocation and logout
-* Account-locking and throttling
-* Error envelope
-
-### Conversations
-
-* Conversation-list response
-* Conversation membership
-* Direct and group conversation rules
-* Pagination
-* Unread counts
-* Roles and permissions
-
-### Messages
-
-* Message schema
-* Supported content types
-* Client message ID
-* Server message ID
-* Timestamps
-* Reply/edit/delete behaviour
-* Delivery and read receipts
-* Pagination and sequence rules
-* Idempotency behaviour
-
-### Attachments
-
-* Upload initialization
-* Multipart or chunking rules
-* Resume and cancellation
-* Maximum sizes and MIME types
-* Malware-scan states
-* Download authorization
-* Metadata schema
-
-### SignalR
-
-* Hub URL
-* Authentication method
-* Event names
-* Payload schemas
-* Group/subscription lifecycle
-* Reconnection rules
-* Token renewal
-* Missed-event recovery
-* Ordering guarantees
-* Deduplication identifiers
-
-### Retention
-
-* Administrator-policy endpoint
-* User-preference endpoint
-* Effective dates
-* Audit requirements
-* Remote purge events
-
-An OpenAPI document and a written SignalR event contract are preferred.
-
-## Oracle Requirements
-
-All persistent server-side application data must be stored in Oracle.
-
-The Oracle and backend teams must define:
-
-* Schema ownership
-* Conversation and participant tables
-* Message and attachment metadata
-* Message ordering
-* Idempotency constraints
-* Pagination indexes
-* Encryption at rest
-* Key-management integration
-* Audit tables
-* Backup and recovery
-* Archiving
-* High availability
-* Data-retention controls
-* Privileged-access controls
-* Search strategy
-* Performance and expected scale
-
-Flutter must not connect directly to Oracle.
 
 ## Security-Team Decisions Required
 
 The security team must approve:
 
+* AGPL licence for the Matrix SDK (see [Licence](#licence-decision-pending))
 * Threat model
-* Authentication and MFA flow
-* Token lifetimes
-* Web refresh-session strategy
+* Push gateway deployment and notification content
+* Loss of server-side plaintext history under end-to-end encryption
+* Recovery-key handling guidance for users
 * TLS and certificate policy
 * MDM compliance rules
 * Root/jailbreak response
-* Local database encryption
 * Screenshot and clipboard policy
 * Message and attachment classification
-* HSM/KMS strategy
-* Database administrator access
-* Malware-scanning integration
+* Malware-scanning integration (none on the server today)
 * Logging and SIEM integration
 * Penetration-testing scope
 * Incident-response behaviour
@@ -823,47 +429,30 @@ dart format --output=none --set-exit-if-changed lib test
 flutter analyze
 flutter test
 flutter build web
+flutter build ios --simulator --debug
 git diff --check
 git status --short
 ```
 
-Also verify relevant iOS and Android builds in approved development environments.
+Platform notes:
+
+* **iOS:** `flutter_vodozemac` ships a prebuilt xcframework through Swift Package Manager (the default on current Flutter). With CocoaPods it is compiled from Rust instead.
+* **Android:** `flutter_vodozemac` is compiled from Rust during the build, so the machine and CI need a Rust toolchain (`rustup`).
+* **SQLCipher:** `package:sqlite3` downloads its prebuilt SQLCipher libraries during the build (see `hooks:` in `pubspec.yaml`).
 
 If a tool is unavailable, report that clearly. Never claim a check passed when it was not executed.
 
 ## Testing Strategy
 
-The project should include:
+The project includes:
 
-* Domain-model tests
-* Repository contract tests
-* Controller tests using fake repositories
-* Web-service mapping tests
-* Token-storage tests
-* Outbox and retry tests
-* Message-deduplication tests
-* Retention-policy tests
-* Widget tests
-* Navigation tests
-* Integration tests for real backend environments
-* Web compilation checks
+* Domain tests (user-ID parsing, the refuse-to-send guard)
+* Error-mapping tests (Matrix error codes → `ChatFailure`)
+* Mapper tests against real SDK `Room`/`Event`/`Timeline` objects (read receipts, edits, reactions, undecryptable events, local echoes)
+* Contract tests on the in-memory test fixture (idempotent send, unencrypted rooms, upload limit, invites)
+* Controller tests through the domain contracts
 
-Important behaviours to test include:
-
-* Repository implementation replacement without controller changes
-* Expired and revoked sessions
-* Concurrent `401` responses
-* MFA-required authentication
-* Offline sending
-* Retry and idempotency
-* Realtime/REST duplicate messages
-* Missed-message recovery
-* Messages arriving for another conversation
-* Retention cleanup
-* Logout cleanup
-* Attachment upload failure
-* Arabic RTL layouts
-* Web token behaviour
+Still needed against the POC server (the SDK spike in `docs/matrix_integration.md`): sign-in, DM with Element, verification and recovery across devices, media limits, offline send, and CI builds.
 
 ## Definition of Done
 
@@ -993,15 +582,15 @@ Recommended next step:
 ### Phase 1 — Core Secure Messaging
 
 * Contract-first Flutter foundation
-* Authentication and MFA integration
-* Direct and group messaging
-* REST and SignalR integration
-* Offline outbox
+* Matrix SDK adapter behind domain contracts
+* Direct and group messaging with end-to-end encryption
+* Device verification, recovery key, and key backup
+* Offline sending with idempotent retry
 * Encrypted local storage
-* Attachments and malware-scan workflow
-* Push notifications
+* Attachments
+* Push notifications (needs a push gateway)
 * Device-retention settings
-* Full authenticated Web history
+* Web support with end-to-end encryption (needs vodozemac WASM)
 * MDM integration
 * Security testing
 
@@ -1019,17 +608,15 @@ Recommended next step:
 
 The following remain unresolved:
 
-* Final REST API specification
-* SignalR hub and event contract
-* Web refresh-session design
-* Local encrypted-database technology
+* AGPL licence of the Matrix SDK, or a switch to a `matrix-rust-sdk` bridge
+* Push gateway (Sygnal or similar), FCM/APNs credentials, or UnifiedPush on Android
+* Full server history versus end-to-end encryption
+* Web end-to-end encryption (vodozemac WASM build)
 * Certificate pinning or enterprise-CA strategy
-* HSM/KMS design
-* Oracle encryption and privileged-access design
 * Final MDM compliance policy
-* Attachment limits
-* Presence and typing privacy rules
-* Final retention option list
+* Device retention and VIP deletion
+* AD/MFA or SSO in front of Matrix
+* Production server naming
 * Expected user, conversation, message, and attachment scale
 
 These decisions must be documented before related production implementations are finalized.
@@ -1061,3 +648,5 @@ If a secret is committed, removing the file is insufficient. The secret must be 
 Proprietary and confidential.
 
 Unauthorized copying, distribution, or use is prohibited.
+
+> **Note:** the POC links AGPL-3.0 libraries (`matrix`, `flutter_vodozemac`). Until legal decides, treat builds as internal POC builds only. See [Licence](#licence-decision-pending).

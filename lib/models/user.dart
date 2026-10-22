@@ -1,15 +1,14 @@
-class User {
-  const User({
-    required this.id,
-    required this.displayName,
-    required this.email,
-    this.isOnline = false,
-    this.lastSeen,
-  });
+import '../domain/ids.dart';
 
-  final String id;
+/// The signed-in account. The server has presence disabled, so there is no
+/// online/last-seen information to model.
+class User {
+  const User({required this.id, required this.displayName, this.deviceId});
+
+  final UserId id;
   final String displayName;
-  final String email;
-  final bool isOnline;
-  final DateTime? lastSeen;
+
+  /// This sign-in's device. Each sign-in creates a new device with its own
+  /// encryption keys.
+  final String? deviceId;
 }

@@ -1,21 +1,44 @@
-import 'package:flutter/material.dart';
+import 'dart:typed_data';
 
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+
+import '../l10n/app_localizations.dart';
 import '../models/chat_message.dart';
+import '../utilities/failure_messages.dart';
+import '../utilities/message_labels.dart';
+import 'voice_note_player.dart';
+
+typedef AttachmentLoader = Future<Uint8List> Function({bool thumbnail});
 
 /// A WhatsApp-style message bubble.
 class MessageBubble extends StatelessWidget {
   const MessageBubble({
     super.key,
     required this.message,
-    required this.isFromMe,
     this.showSenderName = false,
+    this.highlightQuery,
+    this.isCurrentMatch = false,
+    this.loadAttachment,
+    this.onOpenAttachment,
+    this.onReactionTap,
   });
 
   final ChatMessage message;
-  final bool isFromMe;
 
   /// Show sender name above the body (used in group chats for incoming msgs).
   final bool showSenderName;
+
+  /// When set, occurrences of this text within [message.body] are
+  /// highlighted (used by in-conversation search).
+  final String? highlightQuery;
+
+  /// Whether this bubble is the currently focused search match.
+  final bool isCurrentMatch;
+
+  final AttachmentLoader? loadAttachment;
+  final VoidCallback? onOpenAttachment;
+  final void Function(String key)? onReactionTap;
 
   static const _senderPalette = <Color>[
     Color(0xFFE57373),
@@ -35,7 +58,10 @@ class MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isFromMe = message.isOwn;
+    final mutedColor = isDark ? Colors.white54 : Colors.black45;
 
     final Color bubbleColor;
     if (isFromMe) {
@@ -51,83 +77,269 @@ class MessageBubble extends StatelessWidget {
           maxWidth: MediaQuery.of(context).size.width * 0.78,
           minWidth: 80,
         ),
-        child: Container(
-          margin: EdgeInsets.only(
-            top: 2,
-            bottom: 2,
-            left: isFromMe ? 56 : 8,
-            right: isFromMe ? 8 : 56,
-          ),
-          decoration: BoxDecoration(
-            color: bubbleColor,
-            borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(10),
-              topRight: const Radius.circular(10),
-              bottomLeft: Radius.circular(isFromMe ? 10 : 2),
-              bottomRight: Radius.circular(isFromMe ? 2 : 10),
-            ),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black12,
-                blurRadius: 2,
-                offset: Offset(0, 1),
+        child: Column(
+          crossAxisAlignment: isFromMe
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: EdgeInsets.only(
+                top: 2,
+                bottom: 2,
+                left: isFromMe ? 56 : 8,
+                right: isFromMe ? 8 : 56,
               ),
-            ],
-          ),
-          padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (showSenderName && !isFromMe)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 3),
-                  child: Text(
-                    message.senderDisplayName,
-                    style: TextStyle(
-                      color: _senderColor(message.senderId),
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
-                  ),
+              decoration: BoxDecoration(
+                color: bubbleColor,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(10),
+                  topRight: const Radius.circular(10),
+                  bottomLeft: Radius.circular(isFromMe ? 10 : 2),
+                  bottomRight: Radius.circular(isFromMe ? 2 : 10),
                 ),
-              if (message.hasReply) _ReplyPreview(message: message),
-              if (message.hasAttachment)
-                _AttachmentPreview(message: message)
-              else
-                Text(message.body, style: const TextStyle(fontSize: 15)),
-              const SizedBox(height: 2),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  const Spacer(),
-                  Text(
-                    _formatTime(message.sentAt),
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: isDark ? Colors.white54 : Colors.black45,
-                    ),
+                border: isCurrentMatch
+                    ? Border.all(
+                        color: Theme.of(context).colorScheme.primary,
+                        width: 2,
+                      )
+                    : null,
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 2,
+                    offset: Offset(0, 1),
                   ),
-                  if (isFromMe) ...[
-                    const SizedBox(width: 3),
-                    _DeliveryIcon(status: message.status),
-                  ],
                 ],
               ),
-            ],
-          ),
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (showSenderName && !isFromMe)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 3),
+                      child: Text(
+                        message.senderDisplayName,
+                        style: TextStyle(
+                          color: _senderColor(message.senderId.value),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  if (message.hasReply) _ReplyPreview(message: message),
+                  _content(context, l10n, mutedColor),
+                  const SizedBox(height: 2),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (message.edited) ...[
+                        Text(
+                          l10n.edited,
+                          style: TextStyle(fontSize: 11, color: mutedColor),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                      Text(
+                        _formatTime(context, message.sentAt),
+                        style: TextStyle(fontSize: 11, color: mutedColor),
+                      ),
+                      if (isFromMe) ...[
+                        const SizedBox(width: 3),
+                        _DeliveryIcon(
+                          status: message.status,
+                          color: mutedColor,
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            if (message.reactions.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.only(
+                  left: isFromMe ? 56 : 12,
+                  right: isFromMe ? 12 : 56,
+                  bottom: 4,
+                ),
+                child: Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: [
+                    for (final reaction in message.reactions)
+                      _ReactionChip(
+                        reaction: reaction,
+                        onTap: onReactionTap == null
+                            ? null
+                            : () => onReactionTap!(reaction.key),
+                      ),
+                  ],
+                ),
+              ),
+          ],
         ),
       ),
     );
   }
 
-  static String _formatTime(DateTime dt) {
-    final h = dt.hour;
-    final m = dt.minute.toString().padLeft(2, '0');
-    final period = h >= 12 ? 'PM' : 'AM';
-    final hour = h == 0 ? 12 : (h > 12 ? h - 12 : h);
-    return '$hour:$m $period';
+  Widget _content(BuildContext context, AppLocalizations l10n, Color muted) {
+    switch (message.kind) {
+      case MessageKind.text:
+        return _HighlightedBody(text: message.body, query: highlightQuery);
+      case MessageKind.image:
+        if (message.isPending) {
+          return _Placeholder(
+            icon: Icons.image_outlined,
+            text: message.attachmentName ?? l10n.photo,
+          );
+        }
+        return _ImageAttachment(
+          load: loadAttachment,
+          onTap: onOpenAttachment,
+          fallbackLabel: message.attachmentName ?? l10n.photo,
+        );
+      case MessageKind.voice:
+      case MessageKind.audio:
+        final load = loadAttachment;
+        if (load == null || message.isPending) {
+          return _Placeholder(icon: Icons.mic, text: l10n.voiceMessage);
+        }
+        return VoiceNotePlayer(
+          loadBytes: () => load(),
+          totalDuration: Duration(
+            milliseconds: message.attachmentDurationMs ?? 0,
+          ),
+          accentColor: Theme.of(context).colorScheme.primary,
+          mimeType: message.attachmentMimeType,
+        );
+      case MessageKind.file:
+        final size = message.attachmentSizeBytes;
+        return InkWell(
+          onTap: message.isPending ? null : onOpenAttachment,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.insert_drive_file_outlined, size: 28),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      message.attachmentName ?? l10n.file,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    if (size != null)
+                      Text(
+                        formatBytes(size),
+                        style: TextStyle(fontSize: 11, color: muted),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      case MessageKind.deleted:
+      case MessageKind.undecryptable:
+      case MessageKind.unsupported:
+        return _Placeholder(
+          icon: switch (message.kind) {
+            MessageKind.deleted => Icons.block,
+            MessageKind.undecryptable => Icons.lock_clock_outlined,
+            _ => Icons.help_outline,
+          },
+          text: message.kind == MessageKind.undecryptable
+              ? l10n.waitingForKeys
+              : messagePreviewText(l10n, message.kind, ''),
+        );
+    }
+  }
+
+  static String _formatTime(BuildContext context, DateTime dt) {
+    final locale = Localizations.localeOf(context).toString();
+    return DateFormat.jm(locale).format(dt);
+  }
+}
+
+class _Placeholder extends StatelessWidget {
+  const _Placeholder({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(
+      context,
+    ).colorScheme.onSurface.withValues(alpha: 0.6);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: 14,
+              fontStyle: FontStyle.italic,
+              color: color,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _HighlightedBody extends StatelessWidget {
+  const _HighlightedBody({required this.text, this.query});
+
+  final String text;
+  final String? query;
+
+  @override
+  Widget build(BuildContext context) {
+    const style = TextStyle(fontSize: 15);
+    final q = query?.trim();
+    if (q == null || q.isEmpty) {
+      return Text(text, style: style);
+    }
+
+    final lowerText = text.toLowerCase();
+    final lowerQuery = q.toLowerCase();
+    final spans = <TextSpan>[];
+    var start = 0;
+
+    while (true) {
+      final index = lowerText.indexOf(lowerQuery, start);
+      if (index < 0) {
+        spans.add(TextSpan(text: text.substring(start)));
+        break;
+      }
+      if (index > start) {
+        spans.add(TextSpan(text: text.substring(start, index)));
+      }
+      spans.add(
+        TextSpan(
+          text: text.substring(index, index + q.length),
+          style: const TextStyle(
+            backgroundColor: Color(0xFFFFEB3B),
+            color: Colors.black,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      );
+      start = index + q.length;
+    }
+
+    return Text.rich(TextSpan(children: spans), style: style);
   }
 }
 
@@ -138,7 +350,10 @@ class _ReplyPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final kind = message.replyToKind;
+    final body = message.replyToBody;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
@@ -159,7 +374,7 @@ class _ReplyPreview extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            message.replyToSenderName ?? '',
+            message.replyToSenderName ?? l10n.originalMessage,
             style: TextStyle(
               color: Theme.of(context).colorScheme.primary,
               fontWeight: FontWeight.w600,
@@ -168,7 +383,9 @@ class _ReplyPreview extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            message.replyToBody ?? '',
+            kind == null || body == null
+                ? l10n.originalMessageUnavailable
+                : messagePreviewText(l10n, kind, body),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 13),
@@ -179,45 +396,125 @@ class _ReplyPreview extends StatelessWidget {
   }
 }
 
-class _AttachmentPreview extends StatelessWidget {
-  const _AttachmentPreview({required this.message});
+class _ImageAttachment extends StatefulWidget {
+  const _ImageAttachment({
+    required this.load,
+    required this.onTap,
+    required this.fallbackLabel,
+  });
 
-  final ChatMessage message;
+  final AttachmentLoader? load;
+  final VoidCallback? onTap;
+  final String fallbackLabel;
+
+  @override
+  State<_ImageAttachment> createState() => _ImageAttachmentState();
+}
+
+class _ImageAttachmentState extends State<_ImageAttachment> {
+  Future<Uint8List>? _thumbnail;
+
+  @override
+  void initState() {
+    super.initState();
+    _thumbnail = widget.load?.call(thumbnail: true);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Icon(Icons.attach_file, size: 18),
-        const SizedBox(width: 6),
-        Flexible(
-          child: Text(
-            message.attachmentName ?? '',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 14),
-          ),
+    final future = _thumbnail;
+    if (future == null) {
+      return _Placeholder(
+        icon: Icons.image_outlined,
+        text: widget.fallbackLabel,
+      );
+    }
+    return GestureDetector(
+      onTap: widget.onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: FutureBuilder<Uint8List>(
+          future: future,
+          builder: (context, snapshot) {
+            final bytes = snapshot.data;
+            if (bytes != null) {
+              return Image.memory(
+                bytes,
+                width: 220,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                errorBuilder: (_, _, _) => _Placeholder(
+                  icon: Icons.broken_image_outlined,
+                  text: widget.fallbackLabel,
+                ),
+              );
+            }
+            if (snapshot.hasError) {
+              return _Placeholder(
+                icon: Icons.broken_image_outlined,
+                text: widget.fallbackLabel,
+              );
+            }
+            return const SizedBox(
+              width: 220,
+              height: 160,
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+            );
+          },
         ),
-      ],
+      ),
     );
   }
 }
 
+class _ReactionChip extends StatelessWidget {
+  const _ReactionChip({required this.reaction, this.onTap});
+
+  final Reaction reaction;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(
+          color: reaction.includesMe
+              ? scheme.primaryContainer
+              : scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+          border: reaction.includesMe
+              ? Border.all(color: scheme.primary, width: 1)
+              : null,
+        ),
+        child: Text(
+          '${reaction.key} ${reaction.count}',
+          style: const TextStyle(fontSize: 13),
+        ),
+      ),
+    );
+  }
+}
+
+/// Matrix has read receipts but no delivery receipts, so there is no
+/// "delivered" tick: sending (clock), sent (one tick), read (blue ticks),
+/// failed (red).
 class _DeliveryIcon extends StatelessWidget {
-  const _DeliveryIcon({required this.status});
+  const _DeliveryIcon({required this.status, required this.color});
 
   final MessageDeliveryStatus status;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
     switch (status) {
       case MessageDeliveryStatus.pending:
-        return const Icon(Icons.schedule, size: 13, color: Colors.black45);
+        return Icon(Icons.schedule, size: 13, color: color);
       case MessageDeliveryStatus.sent:
-        return const Icon(Icons.done, size: 13, color: Colors.black45);
-      case MessageDeliveryStatus.delivered:
-        return const Icon(Icons.done_all, size: 13, color: Colors.black45);
+        return Icon(Icons.done, size: 13, color: color);
       case MessageDeliveryStatus.read:
         return const Icon(Icons.done_all, size: 13, color: Color(0xFF4FC3F7));
       case MessageDeliveryStatus.failed:
