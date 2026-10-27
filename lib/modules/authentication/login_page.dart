@@ -3,7 +3,9 @@ import 'package:get/get.dart';
 
 import '../../domain/session_state.dart';
 import '../../l10n/app_localizations.dart';
+import '../../styles/tokens.dart';
 import '../../utilities/failure_messages.dart';
+import '../../widgets/app_logo.dart';
 import '../session/session_controller.dart';
 import 'authentication_controller.dart';
 
@@ -17,35 +19,34 @@ class LoginPage extends GetView<AuthenticationController> {
     final passwordController = TextEditingController();
     final obscure = true.obs;
     final session = Get.find<SessionController>();
-    final mutedColor = Theme.of(
-      context,
-    ).colorScheme.onSurface.withValues(alpha: 0.6);
+    final scheme = Theme.of(context).colorScheme;
+    final mutedColor = scheme.onSurfaceVariant;
 
     return Scaffold(
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(32),
+            padding: const EdgeInsets.symmetric(
+              horizontal: Insets.xl,
+              vertical: Insets.xxl,
+            ),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 440),
+              constraints: const BoxConstraints(
+                maxWidth: Sizes.maxContentWidth,
+              ),
               child: AutofillGroup(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Icon(
-                      Icons.forum_rounded,
-                      size: 80,
-                      color: Color(0xFF075E54),
-                    ),
-                    const SizedBox(height: 16),
+                    const Center(child: AppLogo()),
+                    const SizedBox(height: Insets.xl),
                     Text(
                       l10n.appTitle,
                       textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.headlineMedium
-                          ?.copyWith(fontWeight: FontWeight.bold),
+                      style: Theme.of(context).textTheme.headlineMedium,
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: Insets.sm),
                     Text(
                       l10n.loginSubtitle,
                       textAlign: TextAlign.center,
@@ -66,7 +67,7 @@ class LoginPage extends GetView<AuthenticationController> {
                         ),
                       );
                     }),
-                    const SizedBox(height: 40),
+                    const SizedBox(height: Insets.xxl + Insets.sm),
 
                     TextField(
                       controller: idController,
@@ -78,7 +79,7 @@ class LoginPage extends GetView<AuthenticationController> {
                       decoration: InputDecoration(
                         labelText: l10n.username,
                         hintText: l10n.usernameHint,
-                        prefixIcon: const Icon(Icons.person_outline),
+                        prefixIcon: const Icon(Icons.person_outline_rounded),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -93,7 +94,7 @@ class LoginPage extends GetView<AuthenticationController> {
                         autofillHints: const [AutofillHints.password],
                         decoration: InputDecoration(
                           labelText: l10n.password,
-                          prefixIcon: const Icon(Icons.lock_outline),
+                          prefixIcon: const Icon(Icons.lock_outline_rounded),
                           suffixIcon: IconButton(
                             icon: Icon(
                               obscure.value
@@ -116,45 +117,43 @@ class LoginPage extends GetView<AuthenticationController> {
                         padding: const EdgeInsets.only(bottom: 8),
                         child: Text(
                           failureMessage(l10n, failure),
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                            fontSize: 13,
-                          ),
+                          style: TextStyle(color: scheme.error, fontSize: 13),
                           textAlign: TextAlign.center,
                         ),
                       );
                     }),
 
+                    const SizedBox(height: Insets.sm),
                     Obx(
                       () => FilledButton(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(
+                            Sizes.buttonHeight,
+                          ),
+                        ),
                         onPressed: controller.loading.value
                             ? null
                             : () => _signIn(idController, passwordController),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: controller.loading.value
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : Text(l10n.signIn),
-                        ),
+                        child: controller.loading.value
+                            ? SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              )
+                            : Text(l10n.signIn),
                       ),
                     ),
 
-                    const SizedBox(height: 24),
+                    const SizedBox(height: Insets.xl),
                     Text(
                       l10n.loginFooter,
                       textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.onSurface.withValues(alpha: 0.45),
-                      ),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(color: mutedColor),
                     ),
                   ],
                 ),
@@ -186,10 +185,10 @@ class _Notice extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(Insets.md),
       decoration: BoxDecoration(
         color: scheme.secondaryContainer,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(Radii.md),
       ),
       child: Row(
         children: [

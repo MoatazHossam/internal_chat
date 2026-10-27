@@ -7,6 +7,7 @@ import '../../domain/device_trust_state.dart';
 import '../../domain/session_state.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/conversation.dart';
+import '../../styles/tokens.dart';
 import '../../utilities/message_labels.dart';
 import '../../widgets/avatar_widget.dart';
 import '../../widgets/failure_listener.dart';
@@ -23,108 +24,132 @@ class ConversationListPage extends GetView<ChatController> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
 
-    final searchActive = false.obs;
-    final searchQuery = ''.obs;
-    final searchController = TextEditingController();
-
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(kToolbarHeight),
-        child: Obx(
-          () => AppBar(
-            title: searchActive.value
-                ? TextField(
-                    controller: searchController,
-                    autofocus: true,
-                    style: const TextStyle(color: Colors.white),
-                    cursorColor: Colors.white,
-                    decoration: InputDecoration(
-                      hintText: l10n.searchHint,
-                      hintStyle: const TextStyle(color: Colors.white60),
-                      border: InputBorder.none,
-                      fillColor: Colors.transparent,
-                    ),
-                    onChanged: (v) => searchQuery.value = v,
-                  )
-                : Text(l10n.appTitle),
-            actions: [
-              if (searchActive.value)
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () {
-                    searchActive.value = false;
-                    searchQuery.value = '';
-                    searchController.clear();
-                  },
-                )
-              else ...[
-                IconButton(
-                  icon: const Icon(Icons.search),
-                  tooltip: l10n.searchTooltip,
-                  onPressed: () => searchActive.value = true,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.settings_outlined),
-                  tooltip: l10n.settingsTooltip,
-                  onPressed: () => Get.toNamed(AppRoutes.settings),
-                ),
-              ],
-            ],
-          ),
+      appBar: AppBar(
+        toolbarHeight: 64,
+        title: Text(
+          l10n.appTitle,
+          style: Theme.of(context).textTheme.headlineSmall,
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: l10n.settingsTooltip,
+            onPressed: () => Get.toNamed(AppRoutes.settings),
+          ),
+          const SizedBox(width: Insets.xs),
+        ],
       ),
       body: FailureListener(
         failure: controller.failure,
-        child: Column(
-          children: [
-            const _StatusBanners(),
-            Expanded(
-              child: Obx(() {
-                if (controller.loading.value) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final query = searchQuery.value.toLowerCase();
-                final items = controller.conversations.where((c) {
-                  if (query.isEmpty) return true;
-                  return c.title.toLowerCase().contains(query) ||
-                      (c.lastMessagePreview?.toLowerCase().contains(query) ??
-                          false);
-                }).toList();
-
-                if (items.isEmpty) {
-                  return _EmptyState(
-                    text: query.isEmpty ? l10n.noConversations : l10n.noResults,
-                  );
-                }
-
-                return ListView.separated(
-                  itemCount: items.length,
-                  separatorBuilder: (_, _) => Divider(
-                    height: 1,
-                    indent: 72,
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.outlineVariant.withValues(alpha: 0.5),
-                  ),
-                  itemBuilder: (context, index) {
-                    final c = items[index];
-                    return c.isInvite
-                        ? _InviteTile(conversation: c)
-                        : _ConversationTile(conversation: c);
-                  },
-                );
-              }),
-            ),
-          ],
-        ),
+        child: _ConversationListBody(controller: controller),
       ),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: FloatingActionButton.extended(
         onPressed: () => showNewConversationSheet(context, controller),
         tooltip: l10n.newConversationTooltip,
-        child: const Icon(Icons.edit_outlined),
+        icon: const Icon(Icons.add_comment_outlined),
+        label: Text(l10n.newConversationTooltip),
       ),
+    );
+  }
+}
+
+class _ConversationListBody extends StatefulWidget {
+  const _ConversationListBody({required this.controller});
+
+  final ChatController controller;
+
+  @override
+  State<_ConversationListBody> createState() => _ConversationListBodyState();
+}
+
+class _ConversationListBodyState extends State<_ConversationListBody> {
+  final _search = TextEditingController();
+  final _query = ''.obs;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final controller = widget.controller;
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            Insets.lg,
+            Insets.xs,
+            Insets.lg,
+            Insets.sm,
+          ),
+          child: Obx(
+            () => TextField(
+              controller: _search,
+              onChanged: (value) => _query.value = value,
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                hintText: l10n.searchHint,
+                prefixIcon: const Icon(Icons.search_rounded),
+                isDense: true,
+                suffixIcon: _query.value.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: MaterialLocalizations.of(
+                          context,
+                        ).deleteButtonTooltip,
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                        onPressed: () {
+                          _search.clear();
+                          _query.value = '';
+                        },
+                      ),
+              ),
+            ),
+          ),
+        ),
+        const _StatusBanners(),
+        Expanded(
+          child: Obx(() {
+            if (controller.loading.value) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            final query = _query.value.trim().toLowerCase();
+            final items = controller.conversations.where((c) {
+              if (query.isEmpty) return true;
+              return c.title.toLowerCase().contains(query) ||
+                  (c.lastMessagePreview?.toLowerCase().contains(query) ??
+                      false);
+            }).toList();
+
+            if (items.isEmpty) {
+              return _EmptyState(
+                icon: query.isEmpty
+                    ? Icons.forum_outlined
+                    : Icons.search_off_rounded,
+                text: query.isEmpty ? l10n.noConversations : l10n.noResults,
+              );
+            }
+
+            return ListView.builder(
+              // Room for the floating button below the last row.
+              padding: const EdgeInsets.only(bottom: 96),
+              itemCount: items.length,
+              itemBuilder: (context, index) {
+                final c = items[index];
+                return c.isInvite
+                    ? _InviteTile(conversation: c)
+                    : _ConversationTile(conversation: c);
+              },
+            );
+          }),
+        ),
+      ],
     );
   }
 }
@@ -143,9 +168,13 @@ class _StatusBanners extends StatelessWidget {
       final banners = <Widget>[];
       switch (session.state.value.status) {
         case SessionStatus.offline:
-          banners.add(_Banner(icon: Icons.cloud_off, text: l10n.offlineBanner));
+          banners.add(
+            _Banner(icon: Icons.cloud_off_outlined, text: l10n.offlineBanner),
+          );
         case SessionStatus.connecting || SessionStatus.refreshing:
-          banners.add(_Banner(icon: Icons.sync, text: l10n.connectingBanner));
+          banners.add(
+            _Banner(icon: Icons.sync_rounded, text: l10n.connectingBanner),
+          );
         default:
           break;
       }
@@ -159,8 +188,9 @@ class _StatusBanners extends StatelessWidget {
       if (trustText != null) {
         banners.add(
           _Banner(
-            icon: Icons.gpp_maybe_outlined,
+            icon: Icons.shield_outlined,
             text: trustText,
+            prominent: true,
             onTap: () => Get.toNamed(AppRoutes.security),
           ),
         );
@@ -171,41 +201,60 @@ class _StatusBanners extends StatelessWidget {
 }
 
 class _Banner extends StatelessWidget {
-  const _Banner({required this.icon, required this.text, this.onTap});
+  const _Banner({
+    required this.icon,
+    required this.text,
+    this.onTap,
+    this.prominent = false,
+  });
 
   final IconData icon;
   final String text;
   final VoidCallback? onTap;
 
+  /// Asks the user to act (accent colours) rather than just informing.
+  final bool prominent;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.secondaryContainer,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Row(
-            children: [
-              Icon(icon, size: 18, color: scheme.onSecondaryContainer),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  text,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: scheme.onSecondaryContainer,
+    final background = prominent
+        ? scheme.primaryContainer
+        : scheme.surfaceContainerHigh;
+    final foreground = prominent
+        ? scheme.onPrimaryContainer
+        : scheme.onSurfaceVariant;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Insets.lg, 0, Insets.lg, Insets.sm),
+      child: Material(
+        color: background,
+        borderRadius: BorderRadius.circular(Radii.md),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(Radii.md),
+          child: Padding(
+            padding: const EdgeInsets.all(Insets.md),
+            child: Row(
+              children: [
+                Icon(icon, size: 20, color: foreground),
+                const SizedBox(width: Insets.md),
+                Expanded(
+                  child: Text(
+                    text,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: foreground),
                   ),
                 ),
-              ),
-              if (onTap != null)
-                Icon(
-                  Icons.chevron_right,
-                  size: 18,
-                  color: scheme.onSecondaryContainer,
-                ),
-            ],
+                if (onTap != null)
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    size: 20,
+                    color: foreground,
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -214,30 +263,104 @@ class _Banner extends StatelessWidget {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.text});
+  const _EmptyState({required this.icon, required this.text});
 
+  final IconData icon;
   final String text;
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.onSurface;
+    final scheme = Theme.of(context).colorScheme;
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            Icons.chat_bubble_outline,
-            size: 64,
-            color: color.withValues(alpha: 0.3),
+          Container(
+            width: 88,
+            height: 88,
+            decoration: BoxDecoration(
+              color: scheme.primaryContainer,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, size: 40, color: scheme.onPrimaryContainer),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: Insets.lg),
           Text(
             text,
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              color: color.withValues(alpha: 0.5),
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(color: scheme.onSurfaceVariant),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The shared layout of a list row: avatar, a title line and a detail line.
+class _Row extends StatelessWidget {
+  const _Row({
+    required this.conversation,
+    required this.title,
+    required this.detail,
+    this.trailingTop,
+    this.trailingBottom,
+    this.onTap,
+  });
+
+  final Conversation conversation;
+  final Widget title;
+  final Widget detail;
+  final Widget? trailingTop;
+  final Widget? trailingBottom;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: Insets.lg,
+          vertical: Insets.md - 2,
+        ),
+        child: Row(
+          children: [
+            AvatarWidget(
+              name: conversation.title,
+              colorKey: conversation.id.value,
+              isGroup: conversation.kind == ConversationKind.group,
+              radius: 26,
+            ),
+            const SizedBox(width: Insets.md + 2),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(child: title),
+                      if (trailingTop != null) ...[
+                        const SizedBox(width: Insets.sm),
+                        trailingTop!,
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: Insets.xs),
+                  Row(
+                    children: [
+                      Expanded(child: detail),
+                      if (trailingBottom != null) ...[
+                        const SizedBox(width: Insets.sm),
+                        trailingBottom!,
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -252,34 +375,41 @@ class _InviteTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = conversation;
     final l10n = AppLocalizations.of(context)!;
+    final theme = Theme.of(context);
     final controller = Get.find<ChatController>();
     final invitedBy = c.invitedBy;
 
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: AvatarWidget(name: c.title),
+    return _Row(
+      conversation: c,
       title: Text(
         c.title,
-        style: const TextStyle(fontWeight: FontWeight.w600),
+        style: theme.textTheme.titleMedium,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
-      subtitle: Text(
+      detail: Text(
         invitedBy == null ? l10n.invitation : l10n.invitationFrom(invitedBy),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: theme.colorScheme.primary,
+          fontWeight: FontWeight.w500,
+        ),
       ),
-      trailing: Row(
+      trailingTop: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
+          IconButton.outlined(
             tooltip: l10n.decline,
-            icon: const Icon(Icons.close),
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.close_rounded, size: 20),
             onPressed: () => controller.leave(c.id),
           ),
+          const SizedBox(width: Insets.xs),
           IconButton.filled(
             tooltip: l10n.accept,
-            icon: const Icon(Icons.check),
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.check_rounded, size: 20),
             onPressed: () => controller.acceptInvite(c.id),
           ),
         ],
@@ -297,64 +427,72 @@ class _ConversationTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = conversation;
     final l10n = AppLocalizations.of(context)!;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final controller = Get.find<ChatController>();
-    final mutedColor = Theme.of(
-      context,
-    ).colorScheme.onSurface.withValues(alpha: 0.6);
+    final unread = c.unreadCount > 0;
     final lastKind = c.lastMessageKind;
     final senderName = c.lastMessageIsOwn ? l10n.you : c.lastMessageSenderName;
+    final detailStyle = theme.textTheme.bodyMedium?.copyWith(
+      color: unread ? scheme.onSurface : scheme.onSurfaceVariant,
+    );
 
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: AvatarWidget(name: c.title),
+    return _Row(
+      conversation: c,
+      onTap: () => openConversationPage(controller, c.id),
       title: Row(
         children: [
           Flexible(
             child: Text(
               c.title,
-              style: const TextStyle(fontWeight: FontWeight.w600),
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: unread ? FontWeight.w700 : FontWeight.w600,
+              ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ),
           if (!c.isEncrypted) ...[
-            const SizedBox(width: 6),
+            const SizedBox(width: Insets.xs + 2),
             Tooltip(
               message: l10n.notEncryptedBadge,
               child: Icon(
                 Icons.no_encryption_gmailerrorred_outlined,
                 size: 16,
-                color: Theme.of(context).colorScheme.error,
+                color: scheme.error,
               ),
             ),
           ],
         ],
       ),
-      subtitle: c.isTyping
+      trailingTop: c.lastActivityAt == null
+          ? null
+          : Text(
+              _formatTimestamp(context, c.lastActivityAt!, l10n),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: unread ? scheme.primary : scheme.onSurfaceVariant,
+                fontWeight: unread ? FontWeight.w700 : FontWeight.w400,
+              ),
+            ),
+      detail: c.isTyping
           ? Text(
               l10n.typingLabel,
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.primary,
-                fontStyle: FontStyle.italic,
+              maxLines: 1,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: scheme.primary,
+                fontWeight: FontWeight.w500,
               ),
             )
-          : RichText(
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              text: TextSpan(
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: mutedColor),
+          : Text.rich(
+              TextSpan(
                 children: [
                   if (lastKind != null &&
                       senderName != null &&
-                      (c.kind == ConversationKind.group ||
-                          c.lastMessageIsOwn)) ...[
+                      (c.kind == ConversationKind.group || c.lastMessageIsOwn))
                     TextSpan(
                       text: '$senderName: ',
-                      style: const TextStyle(fontWeight: FontWeight.w500),
+                      style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
-                  ],
                   TextSpan(
                     text: lastKind == null
                         ? ''
@@ -366,45 +504,11 @@ class _ConversationTile extends StatelessWidget {
                   ),
                 ],
               ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: detailStyle,
             ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          if (c.lastActivityAt != null)
-            Text(
-              _formatTimestamp(context, c.lastActivityAt!, l10n),
-              style: TextStyle(
-                fontSize: 12,
-                color: c.unreadCount > 0
-                    ? Theme.of(context).colorScheme.primary
-                    : Theme.of(
-                        context,
-                      ).colorScheme.onSurface.withValues(alpha: 0.5),
-              ),
-            ),
-          const SizedBox(height: 4),
-          if (c.unreadCount > 0)
-            Container(
-              padding: const EdgeInsets.all(5),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primary,
-                shape: BoxShape.circle,
-              ),
-              child: Text(
-                c.unreadCount > 99 ? '99+' : '${c.unreadCount}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            )
-          else
-            const SizedBox(height: 20),
-        ],
-      ),
-      onTap: () => openConversationPage(controller, c.id),
+      trailingBottom: unread ? _UnreadBadge(count: c.unreadCount) : null,
     );
   }
 
@@ -428,5 +532,35 @@ class _ConversationTile extends StatelessWidget {
     } else {
       return DateFormat.yMd(locale).format(dt);
     }
+  }
+}
+
+class _UnreadBadge extends StatelessWidget {
+  const _UnreadBadge({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      constraints: const BoxConstraints(minWidth: 22),
+      height: 22,
+      padding: const EdgeInsets.symmetric(horizontal: 7),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: scheme.primary,
+        borderRadius: BorderRadius.circular(11),
+      ),
+      child: Text(
+        count > 99 ? '99+' : '$count',
+        style: TextStyle(
+          color: scheme.onPrimary,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          height: 1,
+        ),
+      ),
+    );
   }
 }

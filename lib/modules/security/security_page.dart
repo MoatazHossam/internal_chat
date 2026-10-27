@@ -4,6 +4,8 @@ import 'package:get/get.dart';
 
 import '../../domain/device_trust_state.dart';
 import '../../l10n/app_localizations.dart';
+import '../../styles/status_colors.dart';
+import '../../styles/tokens.dart';
 import '../../widgets/failure_listener.dart';
 import '../session/session_controller.dart';
 import 'device_trust_controller.dart';
@@ -19,36 +21,55 @@ class SecurityPage extends GetView<DeviceTrustController> {
     final session = Get.find<SessionController>();
     controller.refreshState();
 
+    final scheme = Theme.of(context).colorScheme;
+    final status = StatusColors.of(context);
+
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.securityTitle)),
+      backgroundColor: scheme.surfaceContainerLow,
+      appBar: AppBar(
+        backgroundColor: scheme.surfaceContainerLow,
+        title: Text(l10n.securityTitle),
+      ),
       body: FailureListener(
         failure: controller.failure,
         child: Obx(() {
           final state = controller.state.value;
           final busy = controller.busy.value;
+          final buttonSize = const Size.fromHeight(Sizes.buttonHeight);
           return ListView(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.fromLTRB(
+              Insets.lg,
+              Insets.sm,
+              Insets.lg,
+              Insets.xxl,
+            ),
             children: [
               _StatusCard(state: state),
-              const SizedBox(height: 24),
-              if (busy) const LinearProgressIndicator(),
+              const SizedBox(height: Insets.xl),
+              if (busy) ...[
+                const LinearProgressIndicator(),
+                const SizedBox(height: Insets.lg),
+              ],
               if (state == TrustState.needsRecoverySetup)
                 FilledButton.icon(
-                  icon: const Icon(Icons.key),
+                  style: FilledButton.styleFrom(minimumSize: buttonSize),
+                  icon: const Icon(Icons.key_rounded),
                   label: Text(l10n.setUpRecovery),
                   onPressed: busy ? null : () => _setUpRecovery(context, l10n),
                 ),
               if (state == TrustState.unverified ||
                   state == TrustState.unverifiedNoRecoveryKey)
                 FilledButton.icon(
-                  icon: const Icon(Icons.devices),
+                  style: FilledButton.styleFrom(minimumSize: buttonSize),
+                  icon: const Icon(Icons.devices_rounded),
                   label: Text(l10n.verifyWithOtherDevice),
                   onPressed: busy ? null : controller.verifyWithOtherDevice,
                 ),
               if (state == TrustState.unverified) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: Insets.md),
                 OutlinedButton.icon(
-                  icon: const Icon(Icons.key),
+                  style: OutlinedButton.styleFrom(minimumSize: buttonSize),
+                  icon: const Icon(Icons.key_rounded),
                   label: Text(l10n.enterRecoveryKey),
                   onPressed: busy
                       ? null
@@ -56,27 +77,41 @@ class SecurityPage extends GetView<DeviceTrustController> {
                 ),
               ],
               if (state == TrustState.unknown)
-                TextButton.icon(
-                  icon: const Icon(Icons.refresh),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(minimumSize: buttonSize),
+                  icon: const Icon(Icons.refresh_rounded),
                   label: Text(l10n.retry),
                   onPressed: busy ? null : controller.refreshState,
                 ),
-              const SizedBox(height: 32),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.warning_amber_rounded,
-                    color: Theme.of(context).colorScheme.error,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(child: Text(l10n.historyLossWarning)),
-                ],
+              const SizedBox(height: Insets.xl),
+              Container(
+                padding: const EdgeInsets.all(Insets.lg),
+                decoration: BoxDecoration(
+                  color: status.warningContainer,
+                  borderRadius: BorderRadius.circular(Radii.lg),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.warning_amber_rounded, color: status.warning),
+                    const SizedBox(width: Insets.md),
+                    Expanded(
+                      child: Text(
+                        l10n.historyLossWarning,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 24),
-              Text(
-                l10n.deviceIdValue(session.state.value.user?.deviceId ?? '—'),
-                style: Theme.of(context).textTheme.bodySmall,
+              const SizedBox(height: Insets.xl),
+              Center(
+                child: SelectableText(
+                  l10n.deviceIdValue(session.state.value.user?.deviceId ?? '—'),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
               ),
             ],
           );
@@ -205,29 +240,31 @@ class _StatusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final status = StatusColors.of(context);
     final (icon, color, title, body) = switch (state) {
       TrustState.verified => (
-        Icons.verified_user,
-        Colors.green,
+        Icons.verified_user_rounded,
+        status.success,
         l10n.trustVerified,
         l10n.trustVerifiedBody,
       ),
       TrustState.unverified => (
         Icons.gpp_maybe_outlined,
-        Colors.orange,
+        status.warning,
         l10n.trustUnverified,
         l10n.trustUnverifiedBody,
       ),
       TrustState.unverifiedNoRecoveryKey => (
         Icons.gpp_maybe_outlined,
-        Colors.orange,
+        status.warning,
         l10n.trustUnverified,
         l10n.trustUnverifiedNoKeyBody,
       ),
       TrustState.needsRecoverySetup => (
-        Icons.key_off_outlined,
-        Colors.orange,
+        Icons.key_off_rounded,
+        status.warning,
         l10n.trustNeedsSetup,
         l10n.trustNeedsSetupBody,
       ),
@@ -238,37 +275,42 @@ class _StatusCard extends StatelessWidget {
         l10n.errorEncryptionUnavailable,
       ),
       TrustState.unknown => (
-        Icons.hourglass_empty,
-        scheme.outline,
+        Icons.hourglass_empty_rounded,
+        scheme.onSurfaceVariant,
         l10n.trustUnknown,
         '',
       ),
     };
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        padding: const EdgeInsets.all(Insets.xl),
+        child: Column(
           children: [
-            Icon(icon, color: color, size: 36),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  if (body.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(body),
-                  ],
-                ],
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.14),
+                shape: BoxShape.circle,
               ),
+              child: Icon(icon, color: color, size: 32),
             ),
+            const SizedBox(height: Insets.lg),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleLarge,
+            ),
+            if (body.isNotEmpty) ...[
+              const SizedBox(height: Insets.sm),
+              Text(
+                body,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
           ],
         ),
       ),

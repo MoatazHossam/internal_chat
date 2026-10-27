@@ -3,7 +3,10 @@ import 'package:get/get.dart';
 
 import '../../app_routes.dart';
 import '../../l10n/app_localizations.dart';
+import '../../styles/status_colors.dart';
+import '../../styles/tokens.dart';
 import '../../widgets/avatar_widget.dart';
+import '../../widgets/section_card.dart';
 import 'settings_controller.dart';
 
 class SettingsPage extends GetView<SettingsController> {
@@ -13,109 +16,121 @@ class SettingsPage extends GetView<SettingsController> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
 
+    final scheme = Theme.of(context).colorScheme;
+    final status = StatusColors.of(context);
+
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.settingsTitle)),
+      backgroundColor: scheme.surfaceContainerLow,
+      appBar: AppBar(
+        backgroundColor: scheme.surfaceContainerLow,
+        title: Text(l10n.settingsTitle),
+      ),
       body: ListView(
+        padding: const EdgeInsets.fromLTRB(
+          Insets.lg,
+          Insets.sm,
+          Insets.lg,
+          Insets.xxl,
+        ),
         children: [
-          // Profile header
-          _ProfileHeader(controller: controller, l10n: l10n),
-
-          const Divider(height: 1),
-
-          // Account section
-          _SectionHeader(label: l10n.account),
-          Obx(
-            () => ListTile(
-              leading: const Icon(Icons.alternate_email),
-              title: Text(l10n.userId),
-              subtitle: Text(controller.currentUser.value?.id.value ?? '—'),
-            ),
-          ),
-          Obx(
-            () => ListTile(
-              leading: const Icon(Icons.smartphone_outlined),
-              title: Text(l10n.deviceId),
-              subtitle: Text(controller.currentUser.value?.deviceId ?? '—'),
-            ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.verified_user_outlined),
-            title: Text(l10n.securityTitle),
-            subtitle: Text(l10n.securitySubtitle),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Get.toNamed(AppRoutes.security),
-          ),
-
-          const Divider(height: 1),
-
-          // Privacy section
-          _SectionHeader(label: l10n.privacyStorage),
-          // Not enforced yet, so nothing to choose: says what happens now.
-          ListTile(
-            leading: const Icon(Icons.history),
-            title: Text(l10n.deviceHistoryRetention),
-            subtitle: Text(l10n.retentionNotAvailable),
-          ),
-
-          const Divider(height: 1),
-
-          // Appearance section
-          _SectionHeader(label: l10n.appearance),
-          Obx(
-            () => SwitchListTile(
-              secondary: const Icon(Icons.dark_mode_outlined),
-              title: Text(l10n.darkMode),
-              subtitle: Text(l10n.darkModeSubtitle),
-              value: controller.isDarkMode.value,
-              onChanged: (value) {
-                controller.isDarkMode.value = value;
-                Get.changeThemeMode(value ? ThemeMode.dark : ThemeMode.light);
-              },
-            ),
-          ),
-          Obx(
-            () => ListTile(
-              leading: const Icon(Icons.language_outlined),
-              title: Text(l10n.language),
-              subtitle: Text(
-                controller.locale.value.languageCode == 'ar'
-                    ? l10n.languageArabic
-                    : l10n.languageEnglish,
+          _ProfileHeader(controller: controller),
+          const SizedBox(height: Insets.xl),
+          SectionCard(
+            title: l10n.account,
+            children: [
+              Obx(
+                () => ListTile(
+                  leading: const TileIcon(Icons.alternate_email_rounded),
+                  title: Text(l10n.userId),
+                  subtitle: Text(controller.currentUser.value?.id.value ?? '—'),
+                ),
               ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _showLanguagePicker(context, l10n),
-            ),
-          ),
-
-          const Divider(height: 1),
-
-          // Danger zone
-          _SectionHeader(label: l10n.session),
-          ListTile(
-            leading: Icon(
-              Icons.logout,
-              color: Theme.of(context).colorScheme.error,
-            ),
-            title: Text(
-              l10n.signOut,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-            onTap: () => _confirmSignOut(context, l10n),
-          ),
-
-          const SizedBox(height: 32),
-          Center(
-            child: Text(
-              l10n.prototypeFooter,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(
-                  context,
-                ).colorScheme.onSurface.withValues(alpha: 0.4),
+              Obx(
+                () => ListTile(
+                  leading: const TileIcon(Icons.smartphone_rounded),
+                  title: Text(l10n.deviceId),
+                  subtitle: Text(controller.currentUser.value?.deviceId ?? '—'),
+                ),
               ),
-            ),
+              ListTile(
+                leading: TileIcon(
+                  Icons.verified_user_outlined,
+                  color: status.success,
+                ),
+                title: Text(l10n.securityTitle),
+                subtitle: Text(l10n.securitySubtitle),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Get.toNamed(AppRoutes.security),
+              ),
+            ],
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: Insets.xl),
+          SectionCard(
+            title: l10n.privacyStorage,
+            children: [
+              // Not enforced yet, so nothing to choose: says what happens
+              // now.
+              ListTile(
+                leading: const TileIcon(Icons.history_rounded),
+                title: Text(l10n.deviceHistoryRetention),
+                subtitle: Text(l10n.retentionNotAvailable),
+              ),
+            ],
+          ),
+          const SizedBox(height: Insets.xl),
+          SectionCard(
+            title: l10n.appearance,
+            children: [
+              Obx(
+                () => SwitchListTile(
+                  secondary: const TileIcon(Icons.dark_mode_outlined),
+                  title: Text(l10n.darkMode),
+                  subtitle: Text(l10n.darkModeSubtitle),
+                  value: controller.isDarkMode.value,
+                  onChanged: (value) {
+                    controller.isDarkMode.value = value;
+                    Get.changeThemeMode(
+                      value ? ThemeMode.dark : ThemeMode.light,
+                    );
+                  },
+                ),
+              ),
+              Obx(
+                () => ListTile(
+                  leading: const TileIcon(Icons.translate_rounded),
+                  title: Text(l10n.language),
+                  subtitle: Text(
+                    controller.locale.value.languageCode == 'ar'
+                        ? l10n.languageArabic
+                        : l10n.languageEnglish,
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _showLanguagePicker(context, l10n),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: Insets.xl),
+          SectionCard(
+            children: [
+              ListTile(
+                leading: TileIcon(Icons.logout_rounded, color: scheme.error),
+                title: Text(
+                  l10n.signOut,
+                  style: TextStyle(color: scheme.error),
+                ),
+                onTap: () => _confirmSignOut(context, l10n),
+              ),
+            ],
+          ),
+          const SizedBox(height: Insets.xl),
+          Text(
+            l10n.prototypeFooter,
+            textAlign: TextAlign.center,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+          ),
         ],
       ),
     );
@@ -203,71 +218,51 @@ class SettingsPage extends GetView<SettingsController> {
 }
 
 class _ProfileHeader extends StatelessWidget {
-  const _ProfileHeader({required this.controller, required this.l10n});
+  const _ProfileHeader({required this.controller});
 
   final SettingsController controller;
-  final AppLocalizations l10n;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      child: Row(
-        children: [
-          Obx(
-            () => AvatarWidget(
-              name: controller.currentUser.value?.displayName ?? 'U',
-              radius: 36,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Obx(
-              () => Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    controller.currentUser.value?.displayName ?? '—',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    controller.currentUser.value?.id.value ?? '',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.onSurface.withValues(alpha: 0.6),
-                    ),
-                  ),
-                ],
+    final theme = Theme.of(context);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(Insets.lg),
+        child: Obx(() {
+          final user = controller.currentUser.value;
+          return Row(
+            children: [
+              AvatarWidget(
+                name: user?.displayName ?? '?',
+                colorKey: user?.id.value,
+                radius: 30,
               ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
-      child: Text(
-        label.toUpperCase(),
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 1.0,
-          color: Theme.of(context).colorScheme.primary,
-        ),
+              const SizedBox(width: Insets.lg),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      user?.displayName ?? '—',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: Insets.xxs),
+                    Text(
+                      user?.id.value ?? '',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        }),
       ),
     );
   }

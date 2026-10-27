@@ -7,8 +7,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../utilities/temporary_media.dart';
 
-/// Minimal WhatsApp-style voice-note playback control: a play/pause button,
-/// a progress bar, and an elapsed/total time label.
+/// Voice-note playback: a play/pause button, a progress bar and an
+/// elapsed/total time label, coloured to match the bubble it sits in.
 ///
 /// The audio is downloaded and decrypted on first play. On mobile it is
 /// written to a temporary file for the platform player and deleted when this
@@ -19,12 +19,16 @@ class VoiceNotePlayer extends StatefulWidget {
     required this.loadBytes,
     required this.totalDuration,
     required this.accentColor,
+    this.onAccentColor = Colors.white,
     this.mimeType,
   });
 
   final Future<Uint8List> Function() loadBytes;
   final Duration totalDuration;
   final Color accentColor;
+
+  /// The play icon on [accentColor].
+  final Color onAccentColor;
   final String? mimeType;
 
   @override
@@ -135,49 +139,64 @@ class _VoiceNotePlayerState extends State<VoiceNotePlayer> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: _toggle,
-          child: CircleAvatar(
-            radius: 15,
-            backgroundColor: widget.accentColor,
-            child: _loading
-                ? const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : Icon(
-                    _failed
-                        ? Icons.error_outline
-                        : isPlaying
-                        ? Icons.pause
-                        : Icons.play_arrow,
-                    size: 17,
-                    color: Colors.white,
-                  ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        SizedBox(
-          width: 100,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 3,
-              backgroundColor: widget.accentColor.withValues(alpha: 0.2),
-              valueColor: AlwaysStoppedAnimation(widget.accentColor),
+        Material(
+          color: widget.accentColor,
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: _toggle,
+            child: SizedBox(
+              width: 38,
+              height: 38,
+              child: Center(
+                child: _loading
+                    ? SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: widget.onAccentColor,
+                        ),
+                      )
+                    : Icon(
+                        _failed
+                            ? Icons.error_outline_rounded
+                            : isPlaying
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
+                        size: 24,
+                        color: widget.onAccentColor,
+                      ),
+              ),
             ),
           ),
         ),
-        const SizedBox(width: 8),
-        Text(
-          _format(showElapsed ? _position : duration),
-          style: const TextStyle(fontSize: 12),
+        const SizedBox(width: 10),
+        SizedBox(
+          width: 120,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(2),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 4,
+                  backgroundColor: widget.accentColor.withValues(alpha: 0.25),
+                  valueColor: AlwaysStoppedAnimation(widget.accentColor),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _format(showElapsed ? _position : duration),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );

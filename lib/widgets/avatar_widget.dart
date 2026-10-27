@@ -1,56 +1,73 @@
 import 'package:flutter/material.dart';
 
-/// Displays an avatar with the first two initials of [name].
-/// The background color is deterministically derived from [name].
+import '../styles/chat_theme.dart';
+
+/// Initials on a soft tint of the person's (or conversation's) identity
+/// colour. People are circles; groups are rounded squares, so the two read
+/// differently at a glance.
 ///
 /// There is no online indicator: presence is disabled on the server.
 class AvatarWidget extends StatelessWidget {
-  const AvatarWidget({super.key, required this.name, this.radius = 24});
+  const AvatarWidget({
+    super.key,
+    required this.name,
+    this.radius = 24,
+    this.isGroup = false,
+    this.colorKey,
+  });
 
   final String name;
   final double radius;
+  final bool isGroup;
 
-  static const _palette = <Color>[
-    Color(0xFFE57373),
-    Color(0xFF81C784),
-    Color(0xFF64B5F6),
-    Color(0xFFFFB74D),
-    Color(0xFFBA68C8),
-    Color(0xFF4DD0E1),
-    Color(0xFFF06292),
-    Color(0xFFAED581),
-    Color(0xFF4FC3F7),
-    Color(0xFFFFD54F),
-  ];
+  /// What the colour is derived from; defaults to [name]. Pass a stable ID
+  /// so the colour does not change when a display name does.
+  final String? colorKey;
 
-  Color _colorFor(String text) {
-    final index = text.codeUnits.fold(0, (a, b) => a + b) % _palette.length;
-    return _palette[index];
-  }
-
-  String _initials(String text) {
+  static String initials(String text) {
     // Matrix IDs ("@name:server") start with a sigil; skip it.
-    final cleaned = text.trim().replaceFirst(RegExp(r'^[@!#]'), '');
+    final cleaned = text
+        .trim()
+        .replaceFirst(RegExp(r'^[@!#]'), '')
+        .split(':')
+        .first;
     final parts = cleaned
-        .split(RegExp(r'\s+'))
+        .split(RegExp(r'[\s._-]+'))
         .where((p) => p.isNotEmpty)
         .toList();
     if (parts.isEmpty) return '?';
-    if (parts.length == 1) return parts[0][0].toUpperCase();
-    return (parts[0][0] + parts[1][0]).toUpperCase();
+    if (parts.length == 1) return parts[0].characters.first.toUpperCase();
+    return (parts[0].characters.first + parts[1].characters.first)
+        .toUpperCase();
   }
 
   @override
   Widget build(BuildContext context) {
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: _colorFor(name),
+    final theme = Theme.of(context);
+    final color = ChatTheme.of(context).identityFor(colorKey ?? name);
+    final dark = theme.brightness == Brightness.dark;
+    final background = Color.alphaBlend(
+      color.withValues(alpha: dark ? 0.22 : 0.14),
+      theme.colorScheme.surface,
+    );
+    final size = radius * 2;
+
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: background,
+        shape: isGroup ? BoxShape.rectangle : BoxShape.circle,
+        borderRadius: isGroup ? BorderRadius.circular(radius * 0.6) : null,
+      ),
       child: Text(
-        _initials(name),
+        initials(name),
         style: TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
-          fontSize: radius * 0.7,
+          color: color,
+          fontWeight: FontWeight.w700,
+          fontSize: radius * 0.72,
+          height: 1,
         ),
       ),
     );

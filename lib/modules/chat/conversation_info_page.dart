@@ -5,8 +5,12 @@ import '../../domain/chat_backend.dart';
 import '../../domain/chat_failure.dart';
 import '../../domain/ids.dart';
 import '../../l10n/app_localizations.dart';
+import '../../models/conversation.dart';
+import '../../styles/status_colors.dart';
+import '../../styles/tokens.dart';
 import '../../widgets/avatar_widget.dart';
 import '../../widgets/failure_listener.dart';
+import '../../widgets/section_card.dart';
 import 'chat_controller.dart';
 
 class ConversationInfoController extends GetxController {
@@ -79,8 +83,15 @@ class ConversationInfoPage extends GetView<ConversationInfoController> {
         .where((c) => c.id == controller.conversationId)
         .firstOrNull;
 
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.conversationInfo)),
+      backgroundColor: scheme.surfaceContainerLow,
+      appBar: AppBar(
+        backgroundColor: scheme.surfaceContainerLow,
+        title: Text(l10n.conversationInfo),
+      ),
       floatingActionButton: Obx(
         () => controller.canInvite.value
             ? FloatingActionButton.extended(
@@ -97,53 +108,58 @@ class ConversationInfoPage extends GetView<ConversationInfoController> {
             return const Center(child: CircularProgressIndicator());
           }
           return ListView(
-            padding: const EdgeInsets.only(bottom: 88),
+            padding: const EdgeInsets.fromLTRB(
+              Insets.lg,
+              Insets.sm,
+              Insets.lg,
+              96,
+            ),
             children: [
-              if (conversation != null)
-                ListTile(
-                  leading: Icon(
-                    conversation.isEncrypted
-                        ? Icons.lock_outline
-                        : Icons.no_encryption_outlined,
-                  ),
-                  title: Text(
-                    conversation.isEncrypted
-                        ? l10n.encryptionInfo
-                        : l10n.notEncryptedComposer,
-                  ),
-                ),
-              const Divider(height: 1),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                child: Text(
-                  l10n.membersTitle(controller.members.length),
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
+              if (conversation != null) ...[
+                _Header(conversation: conversation),
+                const SizedBox(height: Insets.xl),
+              ],
+              SectionCard(
+                title: l10n.membersTitle(controller.members.length),
+                children: [
+                  for (final member in controller.members)
+                    ListTile(
+                      leading: AvatarWidget(
+                        name: member.displayName,
+                        colorKey: member.id.value,
+                        radius: 20,
+                      ),
+                      title: Text(
+                        member.displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        member.id.value,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (member.isInvited)
+                            _RoleChip(label: l10n.invited)
+                          else if (member.role == MemberRole.admin)
+                            _RoleChip(label: l10n.roleAdmin)
+                          else if (member.role == MemberRole.moderator)
+                            _RoleChip(label: l10n.roleModerator),
+                          if (member.canRemove)
+                            IconButton(
+                              tooltip: l10n.removeMember,
+                              icon: const Icon(Icons.person_remove_outlined),
+                              onPressed: () =>
+                                  _confirmRemove(context, l10n, member),
+                            ),
+                        ],
+                      ),
+                    ),
+                ],
               ),
-              for (final member in controller.members)
-                ListTile(
-                  leading: AvatarWidget(name: member.displayName, radius: 20),
-                  title: Text(member.displayName),
-                  subtitle: Text(member.id.value),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (member.isInvited)
-                        _RoleChip(label: l10n.invited)
-                      else if (member.role == MemberRole.admin)
-                        _RoleChip(label: l10n.roleAdmin)
-                      else if (member.role == MemberRole.moderator)
-                        _RoleChip(label: l10n.roleModerator),
-                      if (member.canRemove)
-                        IconButton(
-                          tooltip: l10n.removeMember,
-                          icon: const Icon(Icons.person_remove_outlined),
-                          onPressed: () =>
-                              _confirmRemove(context, l10n, member),
-                        ),
-                    ],
-                  ),
-                ),
             ],
           );
         }),
@@ -237,14 +253,90 @@ class _RoleChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(
+        horizontal: Insets.sm,
+        vertical: Insets.xxs,
+      ),
       decoration: BoxDecoration(
-        color: scheme.secondaryContainer,
-        borderRadius: BorderRadius.circular(10),
+        color: scheme.primaryContainer,
+        borderRadius: BorderRadius.circular(Radii.xs),
       ),
       child: Text(
         label,
-        style: TextStyle(fontSize: 11, color: scheme.onSecondaryContainer),
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w600,
+          color: scheme.onPrimaryContainer,
+        ),
+      ),
+    );
+  }
+}
+
+/// Avatar, name and whether the conversation is end-to-end encrypted.
+class _Header extends StatelessWidget {
+  const _Header({required this.conversation});
+
+  final Conversation conversation;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final encrypted = conversation.isEncrypted;
+    final tone = encrypted ? StatusColors.of(context).success : scheme.error;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(Insets.xl),
+        child: Column(
+          children: [
+            AvatarWidget(
+              name: conversation.title,
+              colorKey: conversation.id.value,
+              isGroup: conversation.kind == ConversationKind.group,
+              radius: 40,
+            ),
+            const SizedBox(height: Insets.md),
+            Text(
+              conversation.title,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleLarge,
+            ),
+            const SizedBox(height: Insets.md),
+            Container(
+              padding: const EdgeInsets.all(Insets.md),
+              decoration: BoxDecoration(
+                color: tone.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(Radii.md),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    encrypted
+                        ? Icons.lock_rounded
+                        : Icons.no_encryption_outlined,
+                    size: 18,
+                    color: tone,
+                  ),
+                  const SizedBox(width: Insets.sm),
+                  Expanded(
+                    child: Text(
+                      encrypted
+                          ? l10n.encryptionInfo
+                          : l10n.notEncryptedComposer,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

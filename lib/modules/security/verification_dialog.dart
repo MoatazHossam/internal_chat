@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../domain/chat_failure.dart';
 import '../../domain/device_trust_state.dart';
 import '../../l10n/app_localizations.dart';
+import '../../styles/status_colors.dart';
 import '../../utilities/failure_messages.dart';
 
 /// Emoji (SAS) verification with another device or user.
@@ -139,7 +140,10 @@ class _VerificationDialogState extends State<VerificationDialog> {
       VerificationDone() => (
         Row(
           children: [
-            const Icon(Icons.verified_user, color: Colors.green),
+            Icon(
+              Icons.verified_user_rounded,
+              color: StatusColors.of(context).success,
+            ),
             const SizedBox(width: 12),
             Expanded(child: Text(l10n.verificationDone)),
           ],

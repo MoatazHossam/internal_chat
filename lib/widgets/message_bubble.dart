@@ -1,22 +1,29 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import 'package:intl/intl.dart' show Bidi, DateFormat;
 
 import '../l10n/app_localizations.dart';
 import '../models/chat_message.dart';
+import '../styles/chat_theme.dart';
+import '../styles/tokens.dart';
 import '../utilities/failure_messages.dart';
 import '../utilities/message_labels.dart';
+import 'avatar_widget.dart';
 import 'voice_note_player.dart';
 
 typedef AttachmentLoader = Future<Uint8List> Function({bool thumbnail});
 
-/// A WhatsApp-style message bubble.
+/// One message. Consecutive messages from the same person form a group:
+/// only the first shows the sender's name, only the last shows their avatar
+/// (in group conversations), and the corners where they meet are tighter.
 class MessageBubble extends StatelessWidget {
   const MessageBubble({
     super.key,
     required this.message,
     this.showSenderName = false,
+    this.isFirstInGroup = true,
+    this.isLastInGroup = true,
     this.highlightQuery,
     this.isCurrentMatch = false,
     this.loadAttachment,
@@ -26,8 +33,10 @@ class MessageBubble extends StatelessWidget {
 
   final ChatMessage message;
 
-  /// Show sender name above the body (used in group chats for incoming msgs).
+  /// Group conversations: name and avatar of other senders.
   final bool showSenderName;
+  final bool isFirstInGroup;
+  final bool isLastInGroup;
 
   /// When set, occurrences of this text within [message.body] are
   /// highlighted (used by in-conversation search).
@@ -40,235 +49,430 @@ class MessageBubble extends StatelessWidget {
   final VoidCallback? onOpenAttachment;
   final void Function(String key)? onReactionTap;
 
-  static const _senderPalette = <Color>[
-    Color(0xFFE57373),
-    Color(0xFF81C784),
-    Color(0xFF64B5F6),
-    Color(0xFFFFB74D),
-    Color(0xFFBA68C8),
-    Color(0xFF4DD0E1),
-    Color(0xFFF06292),
-  ];
-
-  Color _senderColor(String senderId) {
-    final index =
-        senderId.codeUnits.fold(0, (a, b) => a + b) % _senderPalette.length;
-    return _senderPalette[index];
-  }
+  static const _avatarRadius = 16.0;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isFromMe = message.isOwn;
-    final mutedColor = isDark ? Colors.white54 : Colors.black45;
+    final chat = ChatTheme.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final own = message.isOwn;
+    final failed = own && message.isFailed;
+    final colors = _BubbleColors(
+      background: failed
+          ? scheme.errorContainer
+          : own
+          ? chat.outgoing
+          : chat.incoming,
+      foreground: failed
+          ? scheme.onErrorContainer
+          : own
+          ? chat.onOutgoing
+          : chat.onIncoming,
+      meta: failed
+          ? scheme.onErrorContainer.withValues(alpha: 0.75)
+          : own
+          ? chat.outgoingMeta
+          : chat.incomingMeta,
+      accent: own && !failed ? chat.onOutgoing : scheme.primary,
+      quote: own && !failed
+          ? chat.onOutgoing.withValues(alpha: 0.14)
+          : scheme.primary.withValues(alpha: 0.08),
+      readReceipt: chat.readReceipt,
+      error: scheme.error,
+    );
+    final showAvatar = showSenderName && !own;
+    final isImage = message.kind == MessageKind.image && loadAttachment != null;
 
-    final Color bubbleColor;
-    if (isFromMe) {
-      bubbleColor = isDark ? const Color(0xFF005C4B) : const Color(0xFFDCF8C6);
-    } else {
-      bubbleColor = isDark ? const Color(0xFF1E2D35) : Colors.white;
-    }
-
-    return Align(
-      alignment: isFromMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.78,
-          minWidth: 80,
-        ),
-        child: Column(
-          crossAxisAlignment: isFromMe
-              ? CrossAxisAlignment.end
-              : CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              margin: EdgeInsets.only(
-                top: 2,
-                bottom: 2,
-                left: isFromMe ? 56 : 8,
-                right: isFromMe ? 8 : 56,
-              ),
-              decoration: BoxDecoration(
-                color: bubbleColor,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(10),
-                  topRight: const Radius.circular(10),
-                  bottomLeft: Radius.circular(isFromMe ? 10 : 2),
-                  bottomRight: Radius.circular(isFromMe ? 2 : 10),
-                ),
-                border: isCurrentMatch
-                    ? Border.all(
-                        color: Theme.of(context).colorScheme.primary,
-                        width: 2,
-                      )
-                    : null,
-                boxShadow: const [
-                  BoxShadow(
-                    color: Colors.black12,
-                    blurRadius: 2,
-                    offset: Offset(0, 1),
-                  ),
-                ],
-              ),
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (showSenderName && !isFromMe)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 3),
-                      child: Text(
-                        message.senderDisplayName,
-                        style: TextStyle(
-                          color: _senderColor(message.senderId.value),
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                  if (message.forwarded)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 3),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.shortcut, size: 14, color: mutedColor),
-                          const SizedBox(width: 4),
-                          Text(
-                            l10n.forwarded,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontStyle: FontStyle.italic,
-                              color: mutedColor,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  if (message.hasReply) _ReplyPreview(message: message),
-                  _content(context, l10n, mutedColor),
-                  const SizedBox(height: 2),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (message.edited) ...[
-                        Text(
-                          l10n.edited,
-                          style: TextStyle(fontSize: 11, color: mutedColor),
-                        ),
-                        const SizedBox(width: 4),
-                      ],
-                      Text(
-                        _formatTime(context, message.sentAt),
-                        style: TextStyle(fontSize: 11, color: mutedColor),
-                      ),
-                      if (isFromMe) ...[
-                        const SizedBox(width: 3),
-                        _DeliveryIcon(
-                          status: message.status,
-                          color: mutedColor,
-                          l10n: l10n,
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
+    final bubble = Container(
+      decoration: BoxDecoration(
+        color: colors.background,
+        borderRadius: _radius(),
+        border: isCurrentMatch
+            ? Border.all(color: chat.highlight, width: 2)
+            : !own
+            ? Border.all(color: chat.incomingBorder, width: 0.5)
+            : null,
+      ),
+      padding: isImage
+          ? const EdgeInsets.all(Insets.xs)
+          : const EdgeInsets.fromLTRB(
+              Insets.md,
+              Insets.sm,
+              Insets.md,
+              Insets.sm - 2,
             ),
-            if (isFromMe && message.isFailed)
-              Padding(
-                padding: const EdgeInsets.only(right: 12, bottom: 4),
-                child: Text(
-                  l10n.notSentTapForOptions,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(context).colorScheme.error,
-                  ),
-                ),
+      child: DefaultTextStyle.merge(
+        style: TextStyle(color: colors.foreground),
+        child: IconTheme.merge(
+          data: IconThemeData(color: colors.foreground),
+          child: _BubbleContent(
+            message: message,
+            colors: colors,
+            l10n: l10n,
+            showSenderName: showSenderName && !own && isFirstInGroup,
+            senderColor: chat.identityFor(message.senderId.value),
+            highlightQuery: highlightQuery,
+            loadAttachment: loadAttachment,
+            onOpenAttachment: onOpenAttachment,
+            isImage: isImage,
+          ),
+        ),
+      ),
+    );
+    final direction = Directionality.of(context);
+
+    return Padding(
+      padding: EdgeInsets.only(
+        left: Insets.md,
+        right: Insets.md,
+        top: isFirstInGroup ? Insets.sm : Insets.xxs,
+        bottom: Insets.xxs,
+      ),
+      child: Row(
+        // Own messages on the right, others on the left, in both reading
+        // directions.
+        textDirection: TextDirection.ltr,
+        mainAxisAlignment: own
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (showAvatar) ...[
+            SizedBox(
+              width: _avatarRadius * 2,
+              child: isLastInGroup
+                  ? AvatarWidget(
+                      name: message.senderDisplayName,
+                      colorKey: message.senderId.value,
+                      radius: _avatarRadius,
+                    )
+                  : null,
+            ),
+            const SizedBox(width: Insets.sm),
+          ],
+          Flexible(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.sizeOf(context).width * 0.76,
               ),
-            if (message.reactions.isNotEmpty)
-              Padding(
-                padding: EdgeInsets.only(
-                  left: isFromMe ? 56 : 12,
-                  right: isFromMe ? 12 : 56,
-                  bottom: 4,
-                ),
-                child: Wrap(
-                  spacing: 4,
-                  runSpacing: 4,
+              child: Directionality(
+                textDirection: direction,
+                child: Column(
+                  crossAxisAlignment: own
+                      ? CrossAxisAlignment.end
+                      : CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    for (final reaction in message.reactions)
-                      _ReactionChip(
-                        reaction: reaction,
-                        onTap: onReactionTap == null
-                            ? null
-                            : () => onReactionTap!(reaction.key),
+                    bubble,
+                    if (message.reactions.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: Insets.xs),
+                        child: Wrap(
+                          spacing: Insets.xs,
+                          runSpacing: Insets.xs,
+                          children: [
+                            for (final reaction in message.reactions)
+                              _ReactionChip(
+                                reaction: reaction,
+                                onTap: onReactionTap == null
+                                    ? null
+                                    : () => onReactionTap!(reaction.key),
+                              ),
+                          ],
+                        ),
+                      ),
+                    if (failed)
+                      Padding(
+                        padding: const EdgeInsets.only(top: Insets.xs),
+                        child: Text(
+                          l10n.notSentTapForOptions,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: scheme.error,
+                                fontWeight: FontWeight.w500,
+                              ),
+                        ),
                       ),
                   ],
                 ),
               ),
-          ],
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _content(BuildContext context, AppLocalizations l10n, Color muted) {
+  /// Round corners, except on the sender's side: tighter where this bubble
+  /// joins the previous one from the same person, and a small "tail" corner
+  /// at the bottom.
+  BorderRadius _radius() {
+    const round = Radius.circular(Radii.bubble);
+    const joined = Radius.circular(Radii.bubbleJoined);
+    final senderTop = isFirstInGroup ? round : joined;
+    return message.isOwn
+        ? BorderRadius.only(
+            topLeft: round,
+            bottomLeft: round,
+            topRight: senderTop,
+            bottomRight: joined,
+          )
+        : BorderRadius.only(
+            topRight: round,
+            bottomRight: round,
+            topLeft: senderTop,
+            bottomLeft: joined,
+          );
+  }
+}
+
+class _BubbleColors {
+  const _BubbleColors({
+    required this.background,
+    required this.foreground,
+    required this.meta,
+    required this.accent,
+    required this.quote,
+    required this.readReceipt,
+    required this.error,
+  });
+
+  final Color background;
+  final Color foreground;
+  final Color meta;
+  final Color accent;
+  final Color quote;
+  final Color readReceipt;
+  final Color error;
+}
+
+class _BubbleContent extends StatelessWidget {
+  const _BubbleContent({
+    required this.message,
+    required this.colors,
+    required this.l10n,
+    required this.showSenderName,
+    required this.senderColor,
+    required this.isImage,
+    this.highlightQuery,
+    this.loadAttachment,
+    this.onOpenAttachment,
+  });
+
+  final ChatMessage message;
+  final _BubbleColors colors;
+  final AppLocalizations l10n;
+  final bool showSenderName;
+  final Color senderColor;
+  final bool isImage;
+  final String? highlightQuery;
+  final AttachmentLoader? loadAttachment;
+  final VoidCallback? onOpenAttachment;
+
+  @override
+  Widget build(BuildContext context) {
+    final header = <Widget>[
+      if (showSenderName)
+        Padding(
+          padding: const EdgeInsets.only(bottom: Insets.xxs),
+          child: Text(
+            message.senderDisplayName,
+            style: TextStyle(
+              color: senderColor,
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
+            ),
+          ),
+        ),
+      if (message.forwarded)
+        Padding(
+          padding: const EdgeInsets.only(bottom: Insets.xs),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.shortcut_rounded, size: 14, color: colors.meta),
+              const SizedBox(width: Insets.xs),
+              Text(
+                l10n.forwarded,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontStyle: FontStyle.italic,
+                  color: colors.meta,
+                ),
+              ),
+            ],
+          ),
+        ),
+      if (message.hasReply) _ReplyPreview(message: message, colors: colors),
+    ];
+    final meta = _Meta(message: message, colors: colors, l10n: l10n);
+
+    if (isImage) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (header.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                Insets.sm,
+                Insets.xs,
+                Insets.sm,
+                Insets.xs,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: header,
+              ),
+            ),
+          Stack(
+            children: [
+              _ImageAttachment(
+                load: loadAttachment,
+                onTap: onOpenAttachment,
+                fallbackLabel: message.attachmentName ?? l10n.photo,
+              ),
+              PositionedDirectional(
+                end: Insets.sm,
+                bottom: Insets.sm,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: Insets.sm,
+                    vertical: Insets.xxs,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.45),
+                    borderRadius: BorderRadius.circular(Radii.sm),
+                  ),
+                  child: _Meta(
+                    message: message,
+                    colors: colors,
+                    l10n: l10n,
+                    overrideColor: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    if (message.kind == MessageKind.text) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ...header,
+          // Short messages keep the time on the same line; longer ones
+          // move it under the text, at the end.
+          Wrap(
+            alignment: WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.end,
+            spacing: Insets.sm,
+            children: [
+              _HighlightedBody(text: message.body, query: highlightQuery),
+              Padding(
+                padding: const EdgeInsets.only(top: Insets.xs),
+                child: meta,
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [...header, _body()],
+        ),
+        const SizedBox(height: Insets.xs),
+        meta,
+      ],
+    );
+  }
+
+  Widget _body() {
     switch (message.kind) {
       case MessageKind.text:
-        return _HighlightedBody(text: message.body, query: highlightQuery);
       case MessageKind.image:
-        // Unsent images are shown from the copy kept in the outbox.
-        return _ImageAttachment(
-          load: loadAttachment,
-          onTap: onOpenAttachment,
-          fallbackLabel: message.attachmentName ?? l10n.photo,
+        return _Placeholder(
+          icon: Icons.image_outlined,
+          text: message.attachmentName ?? l10n.photo,
+          color: colors.meta,
         );
       case MessageKind.voice:
       case MessageKind.audio:
         final load = loadAttachment;
         if (load == null) {
-          return _Placeholder(icon: Icons.mic, text: l10n.voiceMessage);
+          return _Placeholder(
+            icon: Icons.mic_none_rounded,
+            text: l10n.voiceMessage,
+            color: colors.meta,
+          );
         }
         return VoiceNotePlayer(
           loadBytes: () => load(),
           totalDuration: Duration(
             milliseconds: message.attachmentDurationMs ?? 0,
           ),
-          accentColor: Theme.of(context).colorScheme.primary,
+          accentColor: colors.accent,
+          onAccentColor: colors.background,
           mimeType: message.attachmentMimeType,
         );
       case MessageKind.file:
         final size = message.attachmentSizeBytes;
         return InkWell(
           onTap: message.isPending ? null : onOpenAttachment,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.insert_drive_file_outlined, size: 28),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      message.attachmentName ?? l10n.file,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 14),
-                    ),
-                    if (size != null)
-                      Text(
-                        formatBytes(size),
-                        style: TextStyle(fontSize: 11, color: muted),
-                      ),
-                  ],
+          borderRadius: BorderRadius.circular(Radii.sm),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: Insets.xxs),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: colors.quote,
+                    borderRadius: BorderRadius.circular(Radii.sm),
+                  ),
+                  child: Icon(
+                    Icons.description_outlined,
+                    size: 22,
+                    color: colors.accent,
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(width: Insets.md),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        message.attachmentName ?? l10n.file,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (size != null)
+                        Text(
+                          formatBytes(size),
+                          style: TextStyle(fontSize: 12, color: colors.meta),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       case MessageKind.deleted:
@@ -276,39 +480,79 @@ class MessageBubble extends StatelessWidget {
       case MessageKind.unsupported:
         return _Placeholder(
           icon: switch (message.kind) {
-            MessageKind.deleted => Icons.block,
+            MessageKind.deleted => Icons.block_rounded,
             MessageKind.undecryptable => Icons.lock_clock_outlined,
-            _ => Icons.help_outline,
+            _ => Icons.help_outline_rounded,
           },
           text: message.kind == MessageKind.undecryptable
               ? l10n.waitingForKeys
               : messagePreviewText(l10n, message.kind, ''),
+          color: colors.meta,
         );
     }
   }
+}
 
-  static String _formatTime(BuildContext context, DateTime dt) {
+/// "edited", the time and, for own messages, the delivery state.
+class _Meta extends StatelessWidget {
+  const _Meta({
+    required this.message,
+    required this.colors,
+    required this.l10n,
+    this.overrideColor,
+  });
+
+  final ChatMessage message;
+  final _BubbleColors colors;
+  final AppLocalizations l10n;
+  final Color? overrideColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = overrideColor ?? colors.meta;
+    final style = TextStyle(fontSize: 11.5, color: color, height: 1.2);
     final locale = Localizations.localeOf(context).toString();
-    return DateFormat.jm(locale).format(dt);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (message.edited) ...[
+          Text(l10n.edited, style: style),
+          const SizedBox(width: Insets.xs),
+        ],
+        Text(DateFormat.jm(locale).format(message.sentAt), style: style),
+        if (message.isOwn) ...[
+          const SizedBox(width: Insets.xs),
+          _DeliveryIcon(
+            status: message.status,
+            color: color,
+            readColor: overrideColor ?? colors.readReceipt,
+            errorColor: colors.error,
+            l10n: l10n,
+          ),
+        ],
+      ],
+    );
   }
 }
 
 class _Placeholder extends StatelessWidget {
-  const _Placeholder({required this.icon, required this.text});
+  const _Placeholder({
+    required this.icon,
+    required this.text,
+    required this.color,
+  });
 
   final IconData icon;
   final String text;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(
-      context,
-    ).colorScheme.onSurface.withValues(alpha: 0.6);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icon, size: 16, color: color),
-        const SizedBox(width: 6),
+        const SizedBox(width: Insets.xs + 2),
         Flexible(
           child: Text(
             text,
@@ -332,12 +576,18 @@ class _HighlightedBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const style = TextStyle(fontSize: 15);
+    const style = TextStyle(fontSize: 16, height: 1.3);
+    // English in an Arabic interface (and the reverse) reads in its own
+    // direction, so punctuation stays where the writer put it.
+    final direction = Bidi.detectRtlDirectionality(text)
+        ? TextDirection.rtl
+        : TextDirection.ltr;
     final q = query?.trim();
     if (q == null || q.isEmpty) {
-      return Text(text, style: style);
+      return Text(text, style: style, textDirection: direction);
     }
 
+    final chat = ChatTheme.of(context);
     final lowerText = text.toLowerCase();
     final lowerQuery = q.toLowerCase();
     final spans = <TextSpan>[];
@@ -355,68 +605,87 @@ class _HighlightedBody extends StatelessWidget {
       spans.add(
         TextSpan(
           text: text.substring(index, index + q.length),
-          style: const TextStyle(
-            backgroundColor: Color(0xFFFFEB3B),
-            color: Colors.black,
-            fontWeight: FontWeight.bold,
+          style: TextStyle(
+            backgroundColor: chat.highlight,
+            color: chat.onHighlight,
+            fontWeight: FontWeight.w700,
           ),
         ),
       );
       start = index + q.length;
     }
 
-    return Text.rich(TextSpan(children: spans), style: style);
+    return Text.rich(
+      TextSpan(children: spans),
+      style: style,
+      textDirection: direction,
+    );
   }
 }
 
 class _ReplyPreview extends StatelessWidget {
-  const _ReplyPreview({required this.message});
+  const _ReplyPreview({required this.message, required this.colors});
 
   final ChatMessage message;
+  final _BubbleColors colors;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final kind = message.replyToKind;
     final body = message.replyToBody;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
+      margin: const EdgeInsets.only(bottom: Insets.xs + 2),
       decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.08)
-            : Colors.black.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(6),
-        border: Border(
-          left: BorderSide(
-            color: Theme.of(context).colorScheme.primary,
-            width: 3,
-          ),
-        ),
+        color: colors.quote,
+        borderRadius: BorderRadius.circular(Radii.sm),
       ),
-      padding: const EdgeInsets.fromLTRB(8, 5, 8, 5),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            message.replyToSenderName ?? l10n.originalMessage,
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.primary,
-              fontWeight: FontWeight.w600,
-              fontSize: 12,
+      clipBehavior: Clip.antiAlias,
+      child: IntrinsicHeight(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(width: 3, color: colors.accent),
+            Flexible(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  Insets.sm,
+                  Insets.xs + 1,
+                  Insets.sm + 2,
+                  Insets.xs + 1,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      message.replyToSenderName ?? l10n.originalMessage,
+                      style: TextStyle(
+                        color: colors.accent,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12.5,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      kind == null || body == null
+                          ? l10n.originalMessageUnavailable
+                          : messagePreviewText(l10n, kind, body),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        color: colors.foreground.withValues(alpha: 0.85),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            kind == null || body == null
-                ? l10n.originalMessageUnavailable
-                : messagePreviewText(l10n, kind, body),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 13),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -438,6 +707,7 @@ class _ImageAttachment extends StatefulWidget {
 }
 
 class _ImageAttachmentState extends State<_ImageAttachment> {
+  static const _width = 240.0;
   Future<Uint8List>? _thumbnail;
 
   @override
@@ -448,43 +718,62 @@ class _ImageAttachmentState extends State<_ImageAttachment> {
 
   @override
   Widget build(BuildContext context) {
-    final future = _thumbnail;
-    if (future == null) {
-      return _Placeholder(
-        icon: Icons.image_outlined,
-        text: widget.fallbackLabel,
-      );
-    }
+    final scheme = Theme.of(context).colorScheme;
+    Widget frame(Widget child) => Container(
+      width: _width,
+      height: 180,
+      color: scheme.surfaceContainerHigh,
+      alignment: Alignment.center,
+      child: child,
+    );
+    final fallback = frame(
+      Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.broken_image_outlined, color: scheme.onSurfaceVariant),
+          const SizedBox(height: Insets.xs),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Insets.md),
+            child: Text(
+              widget.fallbackLabel,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+
     return GestureDetector(
       onTap: widget.onTap,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(Radii.bubble - Insets.xs),
         child: FutureBuilder<Uint8List>(
-          future: future,
+          future: _thumbnail,
           builder: (context, snapshot) {
             final bytes = snapshot.data;
             if (bytes != null) {
               return Image.memory(
                 bytes,
-                width: 220,
+                width: _width,
                 fit: BoxFit.cover,
                 gaplessPlayback: true,
-                errorBuilder: (_, _, _) => _Placeholder(
-                  icon: Icons.broken_image_outlined,
-                  text: widget.fallbackLabel,
-                ),
+                // Keeps the bubble's size while the image decodes.
+                frameBuilder: (context, child, frameNumber, synchronous) =>
+                    frameNumber == null && !synchronous
+                    ? frame(const SizedBox.shrink())
+                    : child,
+                errorBuilder: (_, _, _) => fallback,
               );
             }
-            if (snapshot.hasError) {
-              return _Placeholder(
-                icon: Icons.broken_image_outlined,
-                text: widget.fallbackLabel,
-              );
-            }
-            return const SizedBox(
-              width: 220,
-              height: 160,
-              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+            if (snapshot.hasError || _thumbnail == null) return fallback;
+            return frame(
+              const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
             );
           },
         ),
@@ -502,23 +791,28 @@ class _ReactionChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        decoration: BoxDecoration(
-          color: reaction.includesMe
-              ? scheme.primaryContainer
-              : scheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
-          border: reaction.includesMe
-              ? Border.all(color: scheme.primary, width: 1)
-              : null,
-        ),
-        child: Text(
-          '${reaction.key} ${reaction.count}',
-          style: const TextStyle(fontSize: 13),
+    final mine = reaction.includesMe;
+    return Material(
+      color: mine ? scheme.primaryContainer : scheme.surface,
+      shape: StadiumBorder(
+        side: BorderSide(color: mine ? scheme.primary : scheme.outlineVariant),
+      ),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: Insets.sm,
+            vertical: Insets.xxs + 1,
+          ),
+          child: Text(
+            '${reaction.key} ${reaction.count}',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: mine ? scheme.onPrimaryContainer : scheme.onSurface,
+            ),
+          ),
         ),
       ),
     );
@@ -527,42 +821,54 @@ class _ReactionChip extends StatelessWidget {
 
 /// Matrix has read receipts but no delivery receipts, so there is no
 /// "delivered" tick: sending (clock), waiting for the connection (cloud),
-/// sent (one tick, only once the server returned the event ID), read (blue
-/// ticks), failed (red).
+/// sent (one tick, only once the server returned the event ID), read (two
+/// ticks, highlighted), failed (error).
 class _DeliveryIcon extends StatelessWidget {
   const _DeliveryIcon({
     required this.status,
     required this.color,
+    required this.readColor,
+    required this.errorColor,
     required this.l10n,
   });
 
   final MessageDeliveryStatus status;
   final Color color;
+  final Color readColor;
+  final Color errorColor;
   final AppLocalizations l10n;
 
   @override
   Widget build(BuildContext context) {
-    switch (status) {
-      case MessageDeliveryStatus.pending:
-        return Icon(
-          Icons.schedule,
-          size: 13,
-          color: color,
-          semanticLabel: l10n.sending,
-        );
-      case MessageDeliveryStatus.waitingForNetwork:
-        return Icon(
-          Icons.cloud_off_outlined,
-          size: 13,
-          color: color,
-          semanticLabel: l10n.waitingForNetwork,
-        );
-      case MessageDeliveryStatus.sent:
-        return Icon(Icons.done, size: 13, color: color);
-      case MessageDeliveryStatus.read:
-        return const Icon(Icons.done_all, size: 13, color: Color(0xFF4FC3F7));
-      case MessageDeliveryStatus.failed:
-        return const Icon(Icons.error_outline, size: 13, color: Colors.red);
-    }
+    const size = 15.0;
+    return switch (status) {
+      MessageDeliveryStatus.pending => Icon(
+        Icons.schedule_rounded,
+        size: size,
+        color: color,
+        semanticLabel: l10n.sending,
+      ),
+      MessageDeliveryStatus.waitingForNetwork => Icon(
+        Icons.cloud_off_rounded,
+        size: size,
+        color: color,
+        semanticLabel: l10n.waitingForNetwork,
+      ),
+      MessageDeliveryStatus.sent => Icon(
+        Icons.done_rounded,
+        size: size,
+        color: color,
+      ),
+      MessageDeliveryStatus.read => Icon(
+        Icons.done_all_rounded,
+        size: size,
+        color: readColor,
+      ),
+      MessageDeliveryStatus.failed => Icon(
+        Icons.error_rounded,
+        size: size,
+        color: errorColor,
+      ),
+    };
   }
 }

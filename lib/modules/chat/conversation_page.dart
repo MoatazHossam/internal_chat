@@ -16,6 +16,8 @@ import '../../domain/ids.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/chat_message.dart';
 import '../../models/conversation.dart';
+import '../../styles/chat_theme.dart';
+import '../../styles/tokens.dart';
 import '../../utilities/failure_messages.dart';
 import '../../utilities/message_labels.dart';
 import '../../utilities/temporary_media.dart';
@@ -94,10 +96,20 @@ class ConversationPage extends GetView<ChatController> {
             final title = conversation?.title ?? '';
             return AppBar(
               titleSpacing: 0,
+              shape: Border(
+                bottom: BorderSide(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
+              ),
               title: Row(
                 children: [
-                  AvatarWidget(name: title, radius: 18),
-                  const SizedBox(width: 10),
+                  AvatarWidget(
+                    name: title,
+                    colorKey: conversationId.value,
+                    isGroup: conversation?.kind == ConversationKind.group,
+                    radius: 19,
+                  ),
+                  const SizedBox(width: Insets.md),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -106,10 +118,7 @@ class ConversationPage extends GetView<ChatController> {
                           title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
+                          style: Theme.of(context).textTheme.titleMedium,
                         ),
                         _AppBarSubtitle(
                           controller: controller,
@@ -123,10 +132,11 @@ class ConversationPage extends GetView<ChatController> {
               ),
               actions: [
                 IconButton(
-                  icon: const Icon(Icons.more_vert),
+                  icon: const Icon(Icons.more_vert_rounded),
                   onPressed: () =>
                       _showConversationMenu(context, l10n, conversationId),
                 ),
+                const SizedBox(width: Insets.xs),
               ],
             );
           }),
@@ -137,9 +147,7 @@ class ConversationPage extends GetView<ChatController> {
             children: [
               Expanded(
                 child: Container(
-                  color: Theme.of(context).brightness == Brightness.dark
-                      ? const Color(0xFF0D1418)
-                      : const Color(0xFFECE5DD),
+                  color: ChatTheme.of(context).background,
                   child: NotificationListener<ScrollNotification>(
                     onNotification: (notification) {
                       final metrics = notification.metrics;
@@ -158,8 +166,7 @@ class ConversationPage extends GetView<ChatController> {
                         controller: _scrollController,
                         reverse: true,
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 4,
-                          vertical: 8,
+                          vertical: Insets.sm,
                         ),
                         itemCount: msgs.length + 1,
                         itemBuilder: (context, index) {
@@ -178,6 +185,13 @@ class ConversationPage extends GetView<ChatController> {
                             msgs,
                             index,
                           );
+                          // Newest first: the older neighbour is at
+                          // index + 1, the newer one at index - 1.
+                          final isFirstInGroup =
+                              showDateSeparator ||
+                              !_sameGroup(msgs[index + 1], msg);
+                          final isLastInGroup =
+                              index == 0 || !_sameGroup(msg, msgs[index - 1]);
 
                           return Column(
                             key: key,
@@ -198,6 +212,8 @@ class ConversationPage extends GetView<ChatController> {
                                   () => MessageBubble(
                                     message: msg,
                                     showSenderName: isGroup,
+                                    isFirstInGroup: isFirstInGroup,
+                                    isLastInGroup: isLastInGroup,
                                     highlightQuery:
                                         controller.messageSearchQuery.value,
                                     isCurrentMatch:
@@ -287,6 +303,15 @@ class ConversationPage extends GetView<ChatController> {
   bool _sameDay(DateTime a, DateTime b) {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
+
+  /// Whether [newer] continues [older]'s group: same sender, same day,
+  /// within a few minutes.
+  static bool _sameGroup(ChatMessage older, ChatMessage newer) =>
+      older.senderId == newer.senderId &&
+      older.sentAt.year == newer.sentAt.year &&
+      older.sentAt.month == newer.sentAt.month &&
+      older.sentAt.day == newer.sentAt.day &&
+      newer.sentAt.difference(older.sentAt).abs() < const Duration(minutes: 5);
 
   void _showMessageOptions(
     BuildContext context,
@@ -674,6 +699,9 @@ class _AppBarSubtitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final style = theme.textTheme.bodySmall;
     return Obx(() {
       final typing = controller.typingLabel.value;
       if (typing != null) {
@@ -681,33 +709,30 @@ class _AppBarSubtitle extends StatelessWidget {
           l10n.isTypingSuffix(typing),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontSize: 12,
-            fontStyle: FontStyle.italic,
-            color: Colors.white70,
+          style: style?.copyWith(
+            color: scheme.primary,
+            fontWeight: FontWeight.w500,
           ),
         );
       }
       final current = conversation;
       if (current == null) return const SizedBox.shrink();
       final encrypted = current.isEncrypted;
+      final color = encrypted ? scheme.onSurfaceVariant : scheme.error;
       return Row(
         children: [
           Icon(
-            encrypted ? Icons.lock_outline : Icons.no_encryption_outlined,
+            encrypted ? Icons.lock_rounded : Icons.no_encryption_outlined,
             size: 12,
-            color: encrypted ? Colors.white70 : Colors.orangeAccent,
+            color: encrypted ? scheme.tertiary : scheme.error,
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: Insets.xs),
           Flexible(
             child: Text(
               encrypted ? l10n.encryptedSubtitle : l10n.notEncryptedBadge,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                color: encrypted ? Colors.white70 : Colors.orangeAccent,
-              ),
+              style: style?.copyWith(color: color),
             ),
           ),
         ],
@@ -738,7 +763,12 @@ class _ListHeader extends StatelessWidget {
           ),
         if (controller.typingLabel.value != null)
           const Padding(
-            padding: EdgeInsets.only(left: 12, bottom: 4),
+            padding: EdgeInsets.fromLTRB(
+              Insets.md,
+              Insets.sm,
+              Insets.md,
+              Insets.xs,
+            ),
             child: Align(
               alignment: Alignment.centerLeft,
               child: TypingIndicator(),
@@ -768,17 +798,18 @@ class _SearchAppBar extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     return AppBar(
       leading: IconButton(
-        icon: const Icon(Icons.arrow_back),
+        icon: const Icon(Icons.arrow_back_rounded),
         onPressed: controller.closeMessageSearch,
+      ),
+      shape: Border(
+        bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       title: TextField(
         autofocus: true,
-        style: const TextStyle(color: Colors.white),
-        cursorColor: Colors.white,
         decoration: InputDecoration(
           hintText: l10n.searchMessagesHint,
-          hintStyle: const TextStyle(color: Colors.white60),
-          border: InputBorder.none,
+          isDense: true,
+          prefixIcon: const Icon(Icons.search_rounded, size: 20),
         ),
         onChanged: controller.updateMessageSearch,
       ),
@@ -791,7 +822,7 @@ class _SearchAppBar extends StatelessWidget implements PreferredSizeWidget {
               children: [
                 Text(
                   l10n.matchCounter(controller.currentMatchPosition, total),
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
                 IconButton(
                   icon: const Icon(Icons.keyboard_arrow_up),
@@ -810,7 +841,7 @@ class _SearchAppBar extends StatelessWidget implements PreferredSizeWidget {
               child: Center(
                 child: Text(
                   l10n.noMatches,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
             );
@@ -838,8 +869,12 @@ class _SendingDisabledBar extends StatelessWidget {
       top: false,
       child: Container(
         width: double.infinity,
-        color: scheme.errorContainer,
-        padding: const EdgeInsets.all(14),
+        margin: const EdgeInsets.all(Insets.md),
+        decoration: BoxDecoration(
+          color: scheme.errorContainer,
+          borderRadius: BorderRadius.circular(Radii.md),
+        ),
+        padding: const EdgeInsets.all(Insets.md + 2),
         child: Row(
           children: [
             Icon(Icons.no_encryption_outlined, color: scheme.onErrorContainer),
@@ -1059,113 +1094,156 @@ class _InputBarState extends State<_InputBar> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final scheme = Theme.of(context).colorScheme;
 
-    return SafeArea(
-      top: false,
-      child: Container(
-        color: isDark ? const Color(0xFF1F2C34) : const Color(0xFFF0F2F5),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Expanded(
-              child: _isRecording
-                  ? _RecordingIndicator(
-                      elapsedLabel: _formatElapsed(_elapsed),
-                      isCancelling: _isCancelling,
-                      l10n: widget.l10n,
-                    )
-                  : Container(
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF2A3942) : Colors.white,
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.emoji_emotions_outlined),
-                            color: Colors.grey,
-                            onPressed: () {},
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        border: Border(top: BorderSide(color: scheme.outlineVariant)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            Insets.sm,
+            Insets.sm,
+            Insets.sm,
+            Insets.sm,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (!_isRecording)
+                IconButton(
+                  tooltip: widget.l10n.document,
+                  icon: const Icon(Icons.add_circle_outline_rounded),
+                  iconSize: 26,
+                  onPressed: _pickAttachment,
+                ),
+              Expanded(
+                child: _isRecording
+                    ? _RecordingIndicator(
+                        elapsedLabel: _formatElapsed(_elapsed),
+                        isCancelling: _isCancelling,
+                        l10n: widget.l10n,
+                      )
+                    : TextField(
+                        controller: widget.inputController,
+                        minLines: 1,
+                        maxLines: 5,
+                        textInputAction: TextInputAction.newline,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: InputDecoration(
+                          hintText: widget.l10n.messageHint,
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: Insets.lg,
+                            vertical: Insets.md - 1,
                           ),
-                          Expanded(
-                            child: TextField(
-                              controller: widget.inputController,
-                              minLines: 1,
-                              maxLines: 5,
-                              textInputAction: TextInputAction.newline,
-                              decoration: InputDecoration(
-                                hintText: widget.l10n.messageHint,
-                                border: InputBorder.none,
-                                fillColor: Colors.transparent,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  vertical: 10,
-                                ),
-                              ),
-                              onChanged: (v) {
-                                widget.hasText.value = v.trim().isNotEmpty;
-                                widget.controller.onComposerChanged(
-                                  widget.conversationId,
-                                  v,
-                                );
-                              },
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(Radii.xl),
+                            borderSide: BorderSide.none,
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(Radii.xl),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(Radii.xl),
+                            borderSide: BorderSide(
+                              color: scheme.primary,
+                              width: 1.5,
                             ),
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.attach_file),
-                            color: Colors.grey,
-                            onPressed: _pickAttachment,
-                          ),
-                        ],
+                        ),
+                        onChanged: (v) {
+                          widget.hasText.value = v.trim().isNotEmpty;
+                          widget.controller.onComposerChanged(
+                            widget.conversationId,
+                            v,
+                          );
+                        },
                       ),
-                    ),
+              ),
+              const SizedBox(width: Insets.sm),
+              Obx(
+                () => widget.hasText.value
+                    ? _ComposerButton(
+                        icon: widget.controller.editing.value == null
+                            ? Icons.arrow_upward_rounded
+                            : Icons.check_rounded,
+                        onPressed: _send,
+                      )
+                    : GestureDetector(
+                        onLongPressStart: (_) => _startRecording(),
+                        onLongPressMoveUpdate: (details) {
+                          if (!_isRecording) return;
+                          final cancelling = details.offsetFromOrigin.dx < -80;
+                          if (cancelling != _isCancelling) {
+                            setState(() => _isCancelling = cancelling);
+                          }
+                        },
+                        onLongPressEnd: (_) {
+                          if (!_isRecording) return;
+                          _finishRecording(cancel: _isCancelling);
+                        },
+                        onLongPressCancel: () {
+                          if (!_isRecording) return;
+                          _finishRecording(cancel: true);
+                        },
+                        child: _ComposerButton(
+                          icon: Icons.mic_rounded,
+                          recording: _isRecording,
+                          // Recording needs press-and-hold; a tap explains it.
+                          onPressed: () => ScaffoldMessenger.of(context)
+                            ..hideCurrentSnackBar()
+                            ..showSnackBar(
+                              SnackBar(content: Text(widget.l10n.holdToRecord)),
+                            ),
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The round send / record button next to the message field.
+class _ComposerButton extends StatelessWidget {
+  const _ComposerButton({
+    required this.icon,
+    required this.onPressed,
+    this.recording = false,
+  });
+
+  final IconData icon;
+  final VoidCallback onPressed;
+  final bool recording;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final chat = ChatTheme.of(context);
+    return AnimatedScale(
+      scale: recording ? 1.25 : 1,
+      duration: Motion.fast,
+      curve: Motion.curve,
+      child: Material(
+        color: recording ? scheme.error : chat.outgoing,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onPressed,
+          child: SizedBox.square(
+            dimension: Sizes.composerButton,
+            child: Icon(
+              icon,
+              color: recording ? scheme.onError : chat.onOutgoing,
             ),
-            const SizedBox(width: 6),
-            Obx(
-              () => widget.hasText.value
-                  ? FloatingActionButton.small(
-                      elevation: 0,
-                      onPressed: _send,
-                      child: Icon(
-                        widget.controller.editing.value == null
-                            ? Icons.send
-                            : Icons.check,
-                      ),
-                    )
-                  : GestureDetector(
-                      onLongPressStart: (_) => _startRecording(),
-                      onLongPressMoveUpdate: (details) {
-                        if (!_isRecording) return;
-                        final cancelling = details.offsetFromOrigin.dx < -80;
-                        if (cancelling != _isCancelling) {
-                          setState(() => _isCancelling = cancelling);
-                        }
-                      },
-                      onLongPressEnd: (_) {
-                        if (!_isRecording) return;
-                        _finishRecording(cancel: _isCancelling);
-                      },
-                      onLongPressCancel: () {
-                        if (!_isRecording) return;
-                        _finishRecording(cancel: true);
-                      },
-                      child: FloatingActionButton.small(
-                        elevation: 0,
-                        // Recording needs press-and-hold; a tap explains it.
-                        onPressed: () => ScaffoldMessenger.of(context)
-                          ..hideCurrentSnackBar()
-                          ..showSnackBar(
-                            SnackBar(content: Text(widget.l10n.holdToRecord)),
-                          ),
-                        backgroundColor: _isRecording
-                            ? Theme.of(context).colorScheme.error
-                            : null,
-                        child: const Icon(Icons.mic),
-                      ),
-                    ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -1185,28 +1263,42 @@ class _RecordingIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+    final scheme = Theme.of(context).colorScheme;
+    final muted = isCancelling ? scheme.error : scheme.onSurfaceVariant;
+    return Container(
+      height: Sizes.composerButton,
+      padding: const EdgeInsets.symmetric(horizontal: Insets.lg),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(Radii.xl),
+      ),
       child: Row(
         children: [
-          const Icon(Icons.fiber_manual_record, color: Colors.red, size: 14),
-          const SizedBox(width: 8),
-          Text(elapsedLabel, style: const TextStyle(fontSize: 14)),
-          const SizedBox(width: 16),
+          Icon(Icons.circle, color: scheme.error, size: 10),
+          const SizedBox(width: Insets.sm),
+          Text(
+            elapsedLabel,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+          const SizedBox(width: Insets.lg),
           Expanded(
             child: Text(
               l10n.slideToCancelRecording,
               textAlign: TextAlign.end,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 13,
-                color: isCancelling
-                    ? Theme.of(context).colorScheme.error
-                    : Colors.grey,
-                fontWeight: isCancelling ? FontWeight.bold : FontWeight.normal,
+                color: muted,
+                fontWeight: isCancelling ? FontWeight.w700 : FontWeight.w400,
               ),
             ),
           ),
-          const Icon(Icons.chevron_left, color: Colors.grey, size: 18),
+          Icon(Icons.chevron_left_rounded, color: muted, size: 18),
         ],
       ),
     );
@@ -1232,43 +1324,63 @@ class _ComposerContextBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final scheme = Theme.of(context).colorScheme;
+    final primary = scheme.primary;
     return Container(
-      color: Theme.of(context).brightness == Brightness.dark
-          ? const Color(0xFF1F2C34)
-          : const Color(0xFFF0F2F5),
-      padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
-      child: Row(
-        children: [
-          Container(width: 3, height: 40, color: primary),
-          const SizedBox(width: 10),
-          if (icon != null) ...[
-            Icon(icon, size: 18, color: primary),
-            const SizedBox(width: 8),
-          ],
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: primary,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
+      color: scheme.surface,
+      padding: const EdgeInsets.fromLTRB(Insets.md, Insets.sm, Insets.xs, 0),
+      child: Container(
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainer,
+          borderRadius: BorderRadius.circular(Radii.md),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(width: 3, color: primary),
+              const SizedBox(width: Insets.md),
+              if (icon != null) ...[
+                Icon(icon, size: 18, color: primary),
+                const SizedBox(width: Insets.sm),
+              ],
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: Insets.sm),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: primary,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        body,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                Text(
-                  body,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13),
-                ),
-              ],
-            ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close_rounded, size: 20),
+                onPressed: onDismiss,
+              ),
+            ],
           ),
-          IconButton(icon: const Icon(Icons.close), onPressed: onDismiss),
-        ],
+        ),
       ),
     );
   }
@@ -1286,31 +1398,25 @@ class _DateSeparator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.only(top: Insets.lg, bottom: Insets.sm),
       child: Center(
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          padding: const EdgeInsets.symmetric(
+            horizontal: Insets.md,
+            vertical: Insets.xs,
+          ),
           decoration: BoxDecoration(
-            color: Theme.of(context).brightness == Brightness.dark
-                ? const Color(0xFF1F2C34).withValues(alpha: 0.9)
-                : Colors.white.withValues(alpha: 0.85),
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black12,
-                blurRadius: 2,
-                offset: Offset(0, 1),
-              ),
-            ],
+            color: scheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(Radii.sm),
           ),
           child: Text(
             _label(context, date, l10n),
             style: TextStyle(
               fontSize: 12,
-              color: Theme.of(
-                context,
-              ).colorScheme.onSurface.withValues(alpha: 0.65),
+              fontWeight: FontWeight.w600,
+              color: scheme.onSurfaceVariant,
             ),
           ),
         ),
@@ -1387,6 +1493,8 @@ class _ForwardSheetState extends State<_ForwardSheet> {
                       }),
                       secondary: AvatarWidget(
                         name: conversation.title,
+                        colorKey: conversation.id.value,
+                        isGroup: conversation.kind == ConversationKind.group,
                         radius: 20,
                       ),
                       title: Text(

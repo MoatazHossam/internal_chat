@@ -2,7 +2,7 @@
 
 A security-first internal messaging application for organizational use, built with Flutter for iOS, Android, and Web.
 
-The application provides a familiar WhatsApp-style experience on top of an end-to-end encrypted [Matrix](https://spec.matrix.org/latest/client-server-api/) homeserver operated by the organization.
+The application provides a familiar chat experience, with its own visual design, on top of an end-to-end encrypted [Matrix](https://spec.matrix.org/latest/client-server-api/) homeserver operated by the organization.
 
 > This project is currently a prototype and must not be treated as production-ready.
 
@@ -112,12 +112,12 @@ Features must not be added merely because they exist in WhatsApp. Organizational
 
 ## UX Direction
 
-The UX should remain close to WhatsApp because users already understand its interaction patterns.
+Interaction patterns stay familiar from mainstream chat apps, because users already understand them. The visual design is the app's own: calm, neutral surfaces with a single indigo accent, not a copy of any other app.
 
 This includes:
 
 * Familiar conversation-list layout
-* Familiar message bubbles
+* Message bubbles grouped by sender
 * Clear sending, sent, read, and failed states (Matrix has no delivery receipts, so there is no "delivered" tick)
 * Familiar attachment actions
 * Predictable navigation
@@ -126,7 +126,21 @@ This includes:
 * Correct RTL and LTR behaviour
 * Light and dark themes
 
-The application must not copy WhatsApp branding, copyrighted assets, or trademarks.
+The application must not copy other apps' branding, copyrighted assets, or trademarks.
+
+### Design system
+
+Everything visual comes from `lib/styles/`; pages use theme colours and tokens, never literal colours or sizes.
+
+| File | Contents |
+|---|---|
+| `palette.dart` | Raw brand, neutral and status colours. Change `Palette.indigo` / `indigoLight` to re-brand |
+| `tokens.dart` | Spacing (`Insets`), corner radii (`Radii`), motion and fixed sizes |
+| `app_theme.dart` | Light and dark `ColorScheme`s and every Material component theme (app bars, fields, buttons, sheets, dialogs, snack bars…) |
+| `chat_theme.dart` | `ChatTheme` extension: chat background, outgoing/incoming bubbles, read ticks, search highlight, per-person identity colours |
+| `status_colors.dart` | `StatusColors` extension: success and warning (danger uses the scheme's error colours) |
+
+Shared pieces in `lib/widgets/`: `AvatarWidget` (tinted initials; circles for people, rounded squares for groups), `SectionCard` / `TileIcon` (grouped settings rows), `AppLogo`, `MessageBubble`.
 
 ## Flutter Structure
 

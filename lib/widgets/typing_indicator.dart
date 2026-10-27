@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
-/// Animated three-dot typing indicator, styled like WhatsApp.
+import '../styles/chat_theme.dart';
+import '../styles/tokens.dart';
+
+/// Animated three dots in an incoming-message bubble.
 class TypingIndicator extends StatefulWidget {
   const TypingIndicator({super.key});
 
@@ -59,20 +62,21 @@ class _TypingIndicatorState extends State<TypingIndicator>
 
   @override
   Widget build(BuildContext context) {
+    final chat = ChatTheme.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(
+        horizontal: Insets.md + 2,
+        vertical: Insets.md,
+      ),
       decoration: BoxDecoration(
-        color: Theme.of(context).brightness == Brightness.dark
-            ? const Color(0xFF1E2D35)
-            : Colors.white,
+        color: chat.incoming,
+        border: Border.all(color: chat.incomingBorder, width: 0.5),
         borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(8),
-          topRight: Radius.circular(8),
-          bottomRight: Radius.circular(8),
+          topLeft: Radius.circular(Radii.bubble),
+          topRight: Radius.circular(Radii.bubble),
+          bottomRight: Radius.circular(Radii.bubble),
+          bottomLeft: Radius.circular(Radii.bubbleJoined),
         ),
-        boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 2, offset: Offset(0, 1)),
-        ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -83,11 +87,11 @@ class _TypingIndicatorState extends State<TypingIndicator>
               return Transform.translate(
                 offset: Offset(0, _animations[i].value),
                 child: Container(
-                  width: 8,
-                  height: 8,
+                  width: 7,
+                  height: 7,
                   margin: const EdgeInsets.symmetric(horizontal: 2),
                   decoration: BoxDecoration(
-                    color: Colors.grey[500],
+                    color: chat.incomingMeta,
                     shape: BoxShape.circle,
                   ),
                 ),
