@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import '../models/chat_message.dart';
 import '../models/conversation.dart';
+import 'chat_failure.dart';
 import 'device_trust_state.dart';
 import 'ids.dart';
 import 'session_state.dart';
@@ -51,7 +52,8 @@ abstract interface class Conversations {
 }
 
 abstract interface class Messages {
-  /// Newest message first. Includes local "sending"/"failed" echoes. Opening
+  /// Newest message first. Includes messages from this device that are not
+  /// sent yet (pending, waiting for network, failed). Opening
   /// the stream loads the conversation; cancelling it releases it.
   Stream<List<ChatMessage>> watch(ConversationId id);
 
@@ -83,8 +85,20 @@ abstract interface class Messages {
     required LocalMessageId localId,
   });
 
-  /// Sends a failed message again with its original idempotency key.
-  Future<void> retry(MessageRef ref);
+  /// Sends a failed message again with its original idempotency key, so the
+  /// server recognises a repeat. When delivery is uncertain
+  /// ([SendFailureReason.uncertain]) the server can no longer recognise it:
+  /// this throws [DeliveryUncertain] unless [acceptDuplicateRisk] is set, in
+  /// which case it is sent as a new message.
+  Future<void> retry(MessageRef ref, {bool acceptDuplicateRisk = false});
+
+  /// Forwards a sent message to [destination] as a new encrypted message
+  /// with its own [localId]. Attachments are not uploaded again.
+  Future<void> forward(
+    MessageRef source,
+    ConversationId destination, {
+    required LocalMessageId localId,
+  });
 
   /// Adds [key] as a reaction, or removes it if the user already reacted
   /// with it.

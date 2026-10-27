@@ -6,27 +6,6 @@ import '../../l10n/app_localizations.dart';
 import '../../widgets/avatar_widget.dart';
 import 'settings_controller.dart';
 
-extension _RetentionOptionLabel on RetentionOption {
-  String label(AppLocalizations l10n) {
-    switch (this) {
-      case RetentionOption.sessionOnly:
-        return l10n.retentionSessionOnly;
-      case RetentionOption.oneDay:
-        return l10n.retentionOneDay;
-      case RetentionOption.sevenDays:
-        return l10n.retentionSevenDays;
-      case RetentionOption.thirtyDays:
-        return l10n.retentionThirtyDays;
-      case RetentionOption.ninetyDays:
-        return l10n.retentionNinetyDays;
-      case RetentionOption.oneEightyDays:
-        return l10n.retentionSixMonths;
-      case RetentionOption.oneYear:
-        return l10n.retentionOneYear;
-    }
-  }
-}
-
 class SettingsPage extends GetView<SettingsController> {
   const SettingsPage({super.key});
 
@@ -36,164 +15,108 @@ class SettingsPage extends GetView<SettingsController> {
 
     return Scaffold(
       appBar: AppBar(title: Text(l10n.settingsTitle)),
-      body: Obx(
-        () => ListView(
-          children: [
-            // Profile header
-            _ProfileHeader(controller: controller, l10n: l10n),
+      body: ListView(
+        children: [
+          // Profile header
+          _ProfileHeader(controller: controller, l10n: l10n),
 
-            const Divider(height: 1),
+          const Divider(height: 1),
 
-            // Account section
-            _SectionHeader(label: l10n.account),
-            Obx(
-              () => ListTile(
-                leading: const Icon(Icons.alternate_email),
-                title: Text(l10n.userId),
-                subtitle: Text(controller.currentUser.value?.id.value ?? '—'),
-              ),
+          // Account section
+          _SectionHeader(label: l10n.account),
+          Obx(
+            () => ListTile(
+              leading: const Icon(Icons.alternate_email),
+              title: Text(l10n.userId),
+              subtitle: Text(controller.currentUser.value?.id.value ?? '—'),
             ),
-            Obx(
-              () => ListTile(
-                leading: const Icon(Icons.smartphone_outlined),
-                title: Text(l10n.deviceId),
-                subtitle: Text(controller.currentUser.value?.deviceId ?? '—'),
-              ),
+          ),
+          Obx(
+            () => ListTile(
+              leading: const Icon(Icons.smartphone_outlined),
+              title: Text(l10n.deviceId),
+              subtitle: Text(controller.currentUser.value?.deviceId ?? '—'),
             ),
-            ListTile(
-              leading: const Icon(Icons.verified_user_outlined),
-              title: Text(l10n.securityTitle),
-              subtitle: Text(l10n.securitySubtitle),
+          ),
+          ListTile(
+            leading: const Icon(Icons.verified_user_outlined),
+            title: Text(l10n.securityTitle),
+            subtitle: Text(l10n.securitySubtitle),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Get.toNamed(AppRoutes.security),
+          ),
+
+          const Divider(height: 1),
+
+          // Privacy section
+          _SectionHeader(label: l10n.privacyStorage),
+          // Not enforced yet, so nothing to choose: says what happens now.
+          ListTile(
+            leading: const Icon(Icons.history),
+            title: Text(l10n.deviceHistoryRetention),
+            subtitle: Text(l10n.retentionNotAvailable),
+          ),
+
+          const Divider(height: 1),
+
+          // Appearance section
+          _SectionHeader(label: l10n.appearance),
+          Obx(
+            () => SwitchListTile(
+              secondary: const Icon(Icons.dark_mode_outlined),
+              title: Text(l10n.darkMode),
+              subtitle: Text(l10n.darkModeSubtitle),
+              value: controller.isDarkMode.value,
+              onChanged: (value) {
+                controller.isDarkMode.value = value;
+                Get.changeThemeMode(value ? ThemeMode.dark : ThemeMode.light);
+              },
+            ),
+          ),
+          Obx(
+            () => ListTile(
+              leading: const Icon(Icons.language_outlined),
+              title: Text(l10n.language),
+              subtitle: Text(
+                controller.locale.value.languageCode == 'ar'
+                    ? l10n.languageArabic
+                    : l10n.languageEnglish,
+              ),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => Get.toNamed(AppRoutes.security),
+              onTap: () => _showLanguagePicker(context, l10n),
             ),
+          ),
 
-            const Divider(height: 1),
+          const Divider(height: 1),
 
-            // Privacy section
-            _SectionHeader(label: l10n.privacyStorage),
-            Obx(
-              () => ListTile(
-                leading: const Icon(Icons.history),
-                title: Text(l10n.deviceHistoryRetention),
-                subtitle: Text(controller.selectedRetention.value.label(l10n)),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => _showRetentionPicker(context, l10n),
-              ),
+          // Danger zone
+          _SectionHeader(label: l10n.session),
+          ListTile(
+            leading: Icon(
+              Icons.logout,
+              color: Theme.of(context).colorScheme.error,
             ),
-
-            const Divider(height: 1),
-
-            // Appearance section
-            _SectionHeader(label: l10n.appearance),
-            Obx(
-              () => SwitchListTile(
-                secondary: const Icon(Icons.dark_mode_outlined),
-                title: Text(l10n.darkMode),
-                subtitle: Text(l10n.darkModeSubtitle),
-                value: controller.isDarkMode.value,
-                onChanged: (value) {
-                  controller.isDarkMode.value = value;
-                  Get.changeThemeMode(value ? ThemeMode.dark : ThemeMode.light);
-                },
-              ),
+            title: Text(
+              l10n.signOut,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
-            Obx(
-              () => ListTile(
-                leading: const Icon(Icons.language_outlined),
-                title: Text(l10n.language),
-                subtitle: Text(
-                  controller.locale.value.languageCode == 'ar'
-                      ? l10n.languageArabic
-                      : l10n.languageEnglish,
-                ),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => _showLanguagePicker(context, l10n),
-              ),
-            ),
+            onTap: () => _confirmSignOut(context, l10n),
+          ),
 
-            const Divider(height: 1),
-
-            // Danger zone
-            _SectionHeader(label: l10n.session),
-            ListTile(
-              leading: Icon(
-                Icons.logout,
-                color: Theme.of(context).colorScheme.error,
-              ),
-              title: Text(
-                l10n.signOut,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-              onTap: () => _confirmSignOut(context, l10n),
-            ),
-
-            const SizedBox(height: 32),
-            Center(
-              child: Text(
-                l10n.prototypeFooter,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.onSurface.withValues(alpha: 0.4),
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showRetentionPicker(BuildContext context, AppLocalizations l10n) {
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Text(
-                l10n.retentionSheetTitle,
-                style: Theme.of(
+          const SizedBox(height: 32),
+          Center(
+            child: Text(
+              l10n.prototypeFooter,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(
                   context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                ).colorScheme.onSurface.withValues(alpha: 0.4),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-              child: Text(
-                l10n.retentionSheetBody,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.onSurface.withValues(alpha: 0.6),
-                ),
-              ),
-            ),
-            ...controller.availableRetentionOptions.map(
-              (option) => Obx(
-                () => ListTile(
-                  title: Text(option.label(l10n)),
-                  trailing: controller.selectedRetention.value == option
-                      ? Icon(
-                          Icons.check,
-                          color: Theme.of(context).colorScheme.primary,
-                        )
-                      : null,
-                  onTap: () {
-                    controller.setRetention(option);
-                    Navigator.pop(context);
-                  },
-                ),
-              ),
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 24),
+        ],
       ),
     );
   }

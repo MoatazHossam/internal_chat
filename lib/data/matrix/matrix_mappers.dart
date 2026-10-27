@@ -3,6 +3,8 @@ import 'package:matrix/matrix.dart';
 import '../../domain/ids.dart';
 import '../../models/chat_message.dart';
 import '../../models/conversation.dart';
+import 'outbox/forward_content.dart';
+import 'outbox/outbox_entry.dart';
 
 const _i18n = MatrixDefaultLocalizations();
 
@@ -73,7 +75,8 @@ ChatMessage mapEvent(
   final isOwn = event.senderId == room.client.userID;
   final display = event.getDisplayEvent(timeline);
   final kind = kindOf(display);
-  final status = event.status.isError
+  final failed = event.status.isError;
+  final status = failed
       ? MessageDeliveryStatus.failed
       : event.status.isSending
       ? MessageDeliveryStatus.pending
@@ -98,10 +101,18 @@ ChatMessage mapEvent(
     kind: kind,
     isOwn: isOwn,
     status: status,
+    // Only local echoes left by an earlier version of the app fail here;
+    // current sends live in the outbox. Their attachments were not kept.
+    failureReason: !failed
+        ? null
+        : display.hasAttachment
+        ? SendFailureReason.notResendable
+        : SendFailureReason.server,
     localId: isOwn && transactionId != null
         ? LocalMessageId(transactionId)
         : null,
     edited: event.hasAggregatedEvents(timeline, RelationshipTypes.edit),
+    forwarded: display.content[forwardedMarker] == true,
     canEdit: isOwn && kind == MessageKind.text && event.status.isSent,
     canDelete: kind != MessageKind.deleted && (isOwn || event.canRedact),
     reactions: _reactionsOf(event, timeline),
@@ -119,6 +130,124 @@ ChatMessage mapEvent(
     attachmentDurationMs: _durationMs(display),
   );
 }
+
+/// Outbox entries as messages, newest first. They stay in the list (as
+/// pending, waiting for network or failed) until sent.
+List<ChatMessage> mapOutbox(
+  Iterable<OutboxEntry> entries,
+  Timeline timeline, {
+  required bool online,
+  required bool Function(String txnId) isInFlight,
+}) {
+  final room = timeline.room;
+  final me = room.client.userID ?? '';
+  final myName = room.unsafeGetUserFromMemoryOrFallback(me).calcDisplayname();
+  final messages = [
+    for (final entry in entries)
+      _mapEntry(
+        entry,
+        timeline,
+        senderName: myName,
+        online: online,
+        inFlight: isInFlight(entry.txnId),
+      ),
+  ];
+  messages.sort((a, b) => b.sentAt.compareTo(a.sentAt));
+  return messages;
+}
+
+ChatMessage _mapEntry(
+  OutboxEntry entry,
+  Timeline timeline, {
+  required String senderName,
+  required bool online,
+  required bool inFlight,
+}) {
+  final forwarded = entry.forwardContent;
+  final content = forwarded ?? entry.payload;
+  final info = forwarded?['info'];
+  final infoMap = info is Map ? info : const {};
+  final kind = switch (entry.kind) {
+    OutboxKind.text => MessageKind.text,
+    OutboxKind.voice => MessageKind.voice,
+    OutboxKind.file => _kindOfMime(entry.mimeType),
+    OutboxKind.forward => switch (forwarded?['msgtype']) {
+      MessageTypes.Image => MessageKind.image,
+      MessageTypes.Audio =>
+        forwarded?[_voiceMarker] != null
+            ? MessageKind.voice
+            : MessageKind.audio,
+      MessageTypes.File || MessageTypes.Video => MessageKind.file,
+      _ => MessageKind.text,
+    },
+  };
+
+  final replyId = entry.replyTo;
+  final replyEvent = replyId == null
+      ? null
+      : timeline.events.where((e) => e.eventId == replyId).firstOrNull;
+  final replyDisplay = replyEvent?.getDisplayEvent(timeline);
+
+  final status = switch (entry.state) {
+    OutboxState.failed => MessageDeliveryStatus.failed,
+    OutboxState.queued
+        when !inFlight &&
+            (!online || entry.lastError == SendErrorClass.network) =>
+      MessageDeliveryStatus.waitingForNetwork,
+    OutboxState.queued => MessageDeliveryStatus.pending,
+  };
+
+  return ChatMessage(
+    id: entry.txnId,
+    conversationId: ConversationId(entry.roomId),
+    senderId: UserId(entry.userId),
+    senderDisplayName: senderName,
+    body: kind == MessageKind.text ? (content['body'] as String? ?? '') : '',
+    sentAt: entry.createdAt,
+    kind: kind,
+    isOwn: true,
+    status: status,
+    failureReason: entry.state == OutboxState.failed
+        ? _failureReason(entry.lastError)
+        : null,
+    localId: LocalMessageId(entry.txnId),
+    forwarded: entry.kind == OutboxKind.forward,
+    canDelete: !inFlight,
+    replyToId: replyId,
+    replyToSenderName: replyEvent?.senderFromMemoryOrFallback.calcDisplayname(),
+    replyToBody: replyDisplay == null
+        ? null
+        : _bodyOf(replyDisplay, kindOf(replyDisplay)),
+    replyToKind: replyDisplay == null ? null : kindOf(replyDisplay),
+    attachmentName: kind == MessageKind.text
+        ? null
+        : entry.fileName ??
+              forwarded?['filename'] as String? ??
+              forwarded?['body'] as String?,
+    attachmentMimeType: entry.mimeType ?? infoMap['mimetype'] as String?,
+    attachmentSizeBytes:
+        entry.payload['size'] as int? ?? infoMap['size'] as int?,
+    attachmentDurationMs: entry.durationMs ?? infoMap['duration'] as int?,
+  );
+}
+
+MessageKind _kindOfMime(String? mimeType) {
+  final type = mimeType?.toLowerCase() ?? '';
+  if (type.startsWith('image/')) return MessageKind.image;
+  if (type.startsWith('audio/')) return MessageKind.audio;
+  return MessageKind.file;
+}
+
+SendFailureReason _failureReason(SendErrorClass? error) => switch (error) {
+  SendErrorClass.notAllowed => SendFailureReason.notAllowed,
+  SendErrorClass.tooLarge => SendFailureReason.tooLarge,
+  SendErrorClass.notEncrypted => SendFailureReason.notEncrypted,
+  SendErrorClass.encryptionUnavailable =>
+    SendFailureReason.encryptionUnavailable,
+  SendErrorClass.rejected => SendFailureReason.rejected,
+  SendErrorClass.uncertain => SendFailureReason.uncertain,
+  _ => SendFailureReason.server,
+};
 
 /// Whether [event] gets its own item in the message list. State changes,
 /// reactions, edits, redactions and verification events do not.

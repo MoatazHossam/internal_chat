@@ -22,51 +22,80 @@ const _secureStorage = FlutterSecureStorage(
   ),
 );
 
-/// Opens the SDK store as an SQLCipher database. The SDK keeps the sync
-/// cursor, device keys, room keys and access token in it; the app does not
-/// duplicate them.
+/// The two local databases, both SQLCipher with the same key: the SDK store
+/// (sync cursor, device keys, room keys, access token) and the outbox of
+/// messages not sent yet (text, attachment bytes and attachment keys).
+class EncryptedStores {
+  const EncryptedStores({required this.sdk, required this.outbox});
+
+  final MatrixSdkDatabase sdk;
+  final Database outbox;
+}
+
+/// Opens both local databases.
 ///
-/// Fails closed: if the key cannot be read from platform secure storage or
-/// SQLCipher is not linked, this throws [SecureStorageUnavailable] instead of
-/// falling back to a plaintext database.
-Future<MatrixSdkDatabase> openEncryptedMatrixStore(String name) async {
-  final String cipher;
-  final String path;
+/// Fails closed: if the key cannot be read from platform secure storage, or
+/// SQLCipher is not linked, or a database does not open with the stored
+/// key, this throws [SecureStorageUnavailable]. It never falls back to a
+/// plaintext database and never deletes a database the stored key might
+/// still open. Files are only removed when the key itself is gone (for
+/// example not restored with a device backup): without it they can never be
+/// read again.
+Future<EncryptedStores> openEncryptedStores(String name) async {
+  final ({String value, bool created}) key;
+  final String sdkPath;
+  final String outboxPath;
   try {
-    cipher = await _databaseKey();
-    path = await _databasePath(name);
+    sdkPath = await _databasePath(name);
+    outboxPath = await _databasePath(_outboxName(name));
+    key = await _databaseKey();
+    if (key.created) {
+      await _deleteFiles(sdkPath);
+      await _deleteFiles(outboxPath);
+    }
   } catch (_) {
     throw const SecureStorageUnavailable();
   }
 
+  final factory = createDatabaseFactoryFfi();
+  Database? sdkDatabase;
   try {
-    return await _open(name, path, cipher);
-  } on StateError {
-    // Thrown by applyPragmaKey when the bundled SQLite is not SQLCipher.
-    throw const SecureStorageUnavailable();
+    sdkDatabase = await _openEncrypted(
+      factory,
+      sdkPath,
+      key.value,
+      migratePlaintext: true,
+    );
+    final outbox = await _openEncrypted(factory, outboxPath, key.value);
+    // No `fileStorageLocation`: with one, the SDK writes decrypted
+    // attachments to plain files. Without it, media is never cached on disk.
+    final sdk = await MatrixSdkDatabase.init(name, database: sdkDatabase);
+    return EncryptedStores(sdk: sdk, outbox: outbox);
   } catch (_) {
-    // The file exists but this key cannot open it (for example the key was
-    // lost with a device restore). Without the key its contents are
-    // unreadable, so start a new encrypted store; messages come back from the
-    // server and older keys from the key backup.
-    await _deleteFiles(path);
+    // Includes the StateError thrown when the bundled SQLite is not
+    // SQLCipher, and "file is not a database" for a wrong key.
     try {
-      return await _open(name, path, cipher);
+      await sdkDatabase?.close();
     } catch (_) {
-      throw const SecureStorageUnavailable();
+      // Already failing; closing is best effort.
     }
+    throw const SecureStorageUnavailable();
   }
 }
 
-Future<MatrixSdkDatabase> _open(String name, String path, String cipher) async {
-  final factory = createDatabaseFactoryFfi();
+Future<Database> _openEncrypted(
+  DatabaseFactory factory,
+  String path,
+  String cipher, {
+  bool migratePlaintext = false,
+}) async {
   final helper = SQfLiteEncryptionHelper(
     factory: factory,
     path: path,
     cipher: cipher,
   );
   // Encrypts a plaintext file left by an older build, if one exists.
-  await helper.ensureDatabaseFileEncrypted();
+  if (migratePlaintext) await helper.ensureDatabaseFileEncrypted();
   final database = await factory.openDatabase(
     path,
     options: OpenDatabaseOptions(
@@ -75,17 +104,20 @@ Future<MatrixSdkDatabase> _open(String name, String path, String cipher) async {
           helper.applyPragmaKey(db, ensureIncrementalAutoVacuum: true),
     ),
   );
-  // No `fileStorageLocation`: with one, the SDK writes decrypted attachments
-  // to plain files. Without it, media is never cached on disk.
-  return MatrixSdkDatabase.init(name, database: database);
+  // Reading the schema fails here, not later, if the key is wrong.
+  await database.rawQuery('SELECT count(*) FROM sqlite_master');
+  return database;
 }
 
-/// Deletes the database files and their key after the user signs out. The
-/// database must already be closed.
-Future<void> deleteEncryptedMatrixStore(String name) async {
+/// Deletes both databases and their key after the user signs out. The
+/// databases must already be closed.
+Future<void> deleteEncryptedStores(String name) async {
   await _deleteFiles(await _databasePath(name));
+  await _deleteFiles(await _databasePath(_outboxName(name)));
   await _secureStorage.delete(key: _databaseKeyName);
 }
+
+String _outboxName(String name) => '${name}_outbox';
 
 Future<void> _deleteFiles(String path) async {
   for (final suffix in const ['', '-wal', '-shm', '-journal']) {
@@ -94,9 +126,9 @@ Future<void> _deleteFiles(String path) async {
   }
 }
 
-Future<String> _databaseKey() async {
+Future<({String value, bool created})> _databaseKey() async {
   final existing = await _secureStorage.read(key: _databaseKeyName);
-  if (existing != null) return existing;
+  if (existing != null) return (value: existing, created: false);
 
   final random = Random.secure();
   final bytes = Uint8List.fromList(
@@ -109,7 +141,7 @@ Future<String> _databaseKey() async {
   // launch could not open the database.
   final stored = await _secureStorage.read(key: _databaseKeyName);
   if (stored != created) throw const SecureStorageUnavailable();
-  return created;
+  return (value: created, created: true);
 }
 
 Future<String> _databasePath(String name) async {

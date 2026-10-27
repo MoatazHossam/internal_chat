@@ -255,8 +255,43 @@ class ChatController extends GetxController {
 
   void cancelEditing() => editing.value = null;
 
-  Future<void> retry(ChatMessage message) =>
-      _guard(() => _messages.retry(message.ref));
+  /// Retries a failed message. [acceptDuplicateRisk] is for a message whose
+  /// delivery is uncertain, after the user confirmed sending it again.
+  Future<void> retry(ChatMessage message, {bool acceptDuplicateRisk = false}) =>
+      _guard(
+        () => _messages.retry(
+          message.ref,
+          acceptDuplicateRisk: acceptDuplicateRisk,
+        ),
+      );
+
+  /// Conversations a message can be forwarded to.
+  List<Conversation> get forwardDestinations => [
+    for (final conversation in conversations)
+      if (!conversation.isInvite && conversation.isEncrypted) conversation,
+  ];
+
+  /// Forwards [message] to each destination as a new message with its own
+  /// [LocalMessageId]. Returns how many were queued.
+  Future<int> forward(
+    ChatMessage message,
+    List<ConversationId> destinations,
+  ) async {
+    if (!message.canForward) return 0;
+    var queued = 0;
+    for (final destination in destinations) {
+      final ok = await _guard(() async {
+        await _messages.forward(
+          message.ref,
+          destination,
+          localId: LocalMessageId.generate(),
+        );
+        return true;
+      });
+      if (ok ?? false) queued++;
+    }
+    return queued;
+  }
 
   Future<void> delete(ChatMessage message) =>
       _guard(() => _messages.delete(message.ref));

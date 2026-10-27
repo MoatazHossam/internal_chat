@@ -5,37 +5,15 @@ import '../../domain/chat_backend.dart';
 import '../../models/user.dart';
 import '../../services/locale_service.dart';
 
-/// Retention options shown to the user.
-/// Values match the list in the README. Display labels are localized in
-/// the page, keeping this controller free of UI/localization concerns.
-enum RetentionOption {
-  sessionOnly(0),
-  oneDay(1),
-  sevenDays(7),
-  thirtyDays(30),
-  ninetyDays(90),
-  oneEightyDays(180),
-  oneYear(365);
-
-  const RetentionOption(this.days);
-
-  final int days;
-}
-
 class SettingsController extends GetxController {
   SettingsController(this._session);
 
   final ChatSession _session;
 
   final currentUser = Rxn<User>();
-  final selectedRetention = RetentionOption.thirtyDays.obs;
   final isDarkMode = false.obs;
   final locale = Rx<Locale>(LocaleService.current());
   final loading = false.obs;
-
-  // The administrator maximum is mocked at 365 days.
-  // In production this would come from the policy endpoint.
-  static const int administratorMaximumDays = 365;
 
   @override
   void onInit() {
@@ -45,18 +23,6 @@ class SettingsController extends GetxController {
 
   void _loadCurrentUser() {
     currentUser.value = _session.currentSessionState.user;
-  }
-
-  void setRetention(RetentionOption option) {
-    if (option.days <= administratorMaximumDays) {
-      selectedRetention.value = option;
-    }
-  }
-
-  List<RetentionOption> get availableRetentionOptions {
-    return RetentionOption.values
-        .where((o) => o.days <= administratorMaximumDays)
-        .toList();
   }
 
   Future<void> setLocale(Locale value) async {

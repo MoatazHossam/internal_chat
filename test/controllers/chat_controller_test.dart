@@ -200,4 +200,57 @@ void main() {
   test('defaultServer comes from the signed-in user', () {
     expect(controller.defaultServer, 'demo.invalid');
   });
+
+  test('forwards a message to each destination as a new message', () async {
+    controller.openConversation(_general);
+    await settle();
+    final source = controller.messages.firstWhere((m) => m.canForward);
+    final destinations = controller.forwardDestinations
+        .where((c) => c.id != _general)
+        .map((c) => c.id)
+        .take(2)
+        .toList();
+    expect(destinations, hasLength(2));
+
+    final queued = await controller.forward(source, destinations);
+    await settle();
+
+    expect(queued, 2);
+    final copies = <ChatMessage>[];
+    for (final id in destinations) {
+      final messages = await backend.watch(id).first;
+      copies.add(messages.firstWhere((m) => m.forwarded));
+    }
+    expect(copies.map((m) => m.body), everyElement(source.body));
+    expect(copies.map((m) => m.isOwn), everyElement(isTrue));
+    // Each destination got its own LocalMessageId, never the original's.
+    expect(copies[0].id, isNot(copies[1].id));
+    expect(copies.map((m) => m.id), isNot(contains(source.id)));
+  });
+
+  test('an uncertain message is only resent after the user accepts', () async {
+    controller.openConversation(_general);
+    await settle();
+    await controller.send(_general, 'maybe sent');
+    await settle();
+    final sent = controller.messages.firstWhere((m) => m.body == 'maybe sent');
+    backend.failMessage(sent.ref, SendFailureReason.uncertain);
+    await settle();
+    final failed = controller.messages.firstWhere((m) => m.id == sent.id);
+    expect(failed.failureReason, SendFailureReason.uncertain);
+
+    await controller.retry(failed);
+    expect(controller.failure.value, isA<DeliveryUncertain>());
+    expect(
+      controller.messages.firstWhere((m) => m.id == sent.id).isFailed,
+      isTrue,
+    );
+
+    await controller.retry(failed, acceptDuplicateRisk: true);
+    await settle();
+    expect(
+      controller.messages.firstWhere((m) => m.id == sent.id).isSent,
+      isTrue,
+    );
+  });
 }

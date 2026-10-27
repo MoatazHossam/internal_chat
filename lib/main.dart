@@ -9,10 +9,13 @@ import 'l10n/app_localizations.dart';
 import 'modules/app_binding.dart';
 import 'services/locale_service.dart';
 import 'styles/app_theme.dart';
+import 'utilities/temporary_media.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await GetStorage.init();
+  // Decrypted voice notes and recordings left by a session that was killed.
+  await deleteTemporaryMedia();
   runApp(InternalChatApp(configuration: AppConfiguration.fromEnvironment()));
 }
 

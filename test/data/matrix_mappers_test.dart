@@ -1,5 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:internal_chat/data/matrix/matrix_mappers.dart';
+import 'package:internal_chat/data/matrix/outbox/forward_content.dart';
+import 'package:internal_chat/data/matrix/outbox/outbox_entry.dart';
 import 'package:internal_chat/models/chat_message.dart';
 import 'package:matrix/matrix.dart';
 // Not exported by the SDK's public library; needed to build a Timeline
@@ -249,5 +251,124 @@ void main() {
       ),
       isFalse,
     );
+  });
+
+  test('marks forwarded messages', () {
+    final timeline = timelineOf([
+      event(r'$f', _bob, {
+        'msgtype': MessageTypes.Text,
+        'body': 'passed on',
+        forwardedMarker: true,
+      }, ts: 1000),
+    ]);
+    expect(mapTimeline(timeline).single.forwarded, isTrue);
+  });
+
+  group('outbox entries', () {
+    OutboxEntry entry(
+      String txnId, {
+      OutboxKind kind = OutboxKind.text,
+      Map<String, Object?> payload = const {'body': 'hi'},
+      OutboxState state = OutboxState.queued,
+      SendErrorClass? lastError,
+      int at = 0,
+    }) => OutboxEntry(
+      txnId: txnId,
+      userId: _me,
+      deviceId: 'DEVICE',
+      roomId: room.id,
+      kind: kind,
+      payload: payload,
+      createdAt: DateTime.fromMillisecondsSinceEpoch(10000 + at),
+      state: state,
+      lastError: lastError,
+    );
+
+    test('show their state, newest first', () {
+      final timeline = timelineOf([
+        event(r'$1', _bob, {'msgtype': MessageTypes.Text, 'body': 'x'}),
+      ]);
+      final messages = mapOutbox(
+        [
+          entry('sending', at: 1),
+          entry('waiting', lastError: SendErrorClass.network, at: 2),
+          entry(
+            'failed',
+            state: OutboxState.failed,
+            lastError: SendErrorClass.uncertain,
+            at: 3,
+          ),
+        ],
+        timeline,
+        online: true,
+        isInFlight: (txnId) => txnId == 'sending',
+      );
+
+      expect(messages.map((m) => m.id), ['failed', 'waiting', 'sending']);
+      expect(messages[2].status, MessageDeliveryStatus.pending);
+      expect(messages[2].canDelete, isFalse);
+      expect(messages[1].status, MessageDeliveryStatus.waitingForNetwork);
+      expect(messages[0].status, MessageDeliveryStatus.failed);
+      expect(messages[0].failureReason, SendFailureReason.uncertain);
+      expect(messages.every((m) => m.isOwn && m.localId != null), isTrue);
+    });
+
+    test('show as waiting while offline', () {
+      final message = mapOutbox(
+        [entry('t1')],
+        timelineOf([]),
+        online: false,
+        isInFlight: (_) => false,
+      ).single;
+      expect(message.status, MessageDeliveryStatus.waitingForNetwork);
+      expect(message.isPending, isTrue);
+    });
+
+    test('map files, voice notes and forwards', () {
+      final messages = mapOutbox(
+        [
+          entry(
+            'img',
+            kind: OutboxKind.file,
+            payload: const {
+              'name': 'p.png',
+              'mimeType': 'image/png',
+              'size': 10,
+            },
+            at: 3,
+          ),
+          entry(
+            'voice',
+            kind: OutboxKind.voice,
+            payload: const {'name': 'v.m4a', 'durationMs': 4200},
+            at: 2,
+          ),
+          entry(
+            'fwd',
+            kind: OutboxKind.forward,
+            payload: const {
+              'content': {
+                'msgtype': 'm.file',
+                'body': 'report.pdf',
+                'info': {'mimetype': 'application/pdf', 'size': 99},
+              },
+            },
+            at: 1,
+          ),
+        ],
+        timelineOf([]),
+        online: true,
+        isInFlight: (_) => false,
+      );
+
+      expect(messages[0].kind, MessageKind.image);
+      expect(messages[0].attachmentSizeBytes, 10);
+      expect(messages[1].kind, MessageKind.voice);
+      expect(messages[1].attachmentDurationMs, 4200);
+      expect(messages[2].kind, MessageKind.file);
+      expect(messages[2].forwarded, isTrue);
+      expect(messages[2].attachmentName, 'report.pdf');
+      expect(messages[2].attachmentSizeBytes, 99);
+    });
   });
 }

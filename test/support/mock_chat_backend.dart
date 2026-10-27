@@ -247,17 +247,51 @@ final class MockChatBackend implements ChatBackend {
   }
 
   @override
-  Future<void> retry(MessageRef ref) async {
+  Future<void> retry(MessageRef ref, {bool acceptDuplicateRisk = false}) async {
     final room = _roomOrThrow(ref.conversationId);
     final index = room.indexOf(ref.messageId);
     if (index < 0 || !room.messages[index].isFailed) {
       throw const NotAvailable();
+    }
+    if (room.messages[index].failureReason == SendFailureReason.uncertain &&
+        !acceptDuplicateRisk) {
+      throw const DeliveryUncertain();
     }
     room.messages[index] = _copy(
       room.messages[index],
       status: MessageDeliveryStatus.sent,
     );
     _notify();
+  }
+
+  @override
+  Future<void> forward(
+    MessageRef source,
+    ConversationId destination, {
+    required LocalMessageId localId,
+  }) async {
+    final room = _roomOrThrow(source.conversationId);
+    final index = room.indexOf(source.messageId);
+    if (index < 0 || !room.messages[index].canForward) {
+      throw const NotAvailable();
+    }
+    final message = room.messages[index];
+    final bytes = _attachments[message.id];
+    await _send(
+      destination,
+      localId: localId,
+      body: message.body,
+      kind: message.kind,
+      forwarded: true,
+      file: bytes == null
+          ? null
+          : FileSource(
+              name: message.attachmentName ?? 'file',
+              bytes: bytes,
+              mimeType: message.attachmentMimeType,
+            ),
+      durationMs: message.attachmentDurationMs,
+    );
   }
 
   @override
@@ -385,6 +419,28 @@ final class MockChatBackend implements ChatBackend {
       _MockVerification(onDone: () => _setTrust(TrustState.verified));
 
   /// Simulates another device asking to verify this one.
+  /// Marks one of the user's messages as failed with [reason].
+  void failMessage(MessageRef ref, SendFailureReason reason) {
+    final room = _roomOrThrow(ref.conversationId);
+    final index = room.indexOf(ref.messageId);
+    final m = room.messages[index];
+    room.messages[index] = ChatMessage(
+      id: m.id,
+      conversationId: m.conversationId,
+      senderId: m.senderId,
+      senderDisplayName: m.senderDisplayName,
+      body: m.body,
+      sentAt: m.sentAt,
+      kind: m.kind,
+      isOwn: m.isOwn,
+      status: MessageDeliveryStatus.failed,
+      failureReason: reason,
+      localId: m.localId,
+      canDelete: true,
+    );
+    _notify();
+  }
+
   void simulateIncomingVerification() {
     _incoming.add(
       _MockVerification(
@@ -406,6 +462,7 @@ final class MockChatBackend implements ChatBackend {
     MessageRef? replyTo,
     FileSource? file,
     int? durationMs,
+    bool forwarded = false,
   }) async {
     final room = _roomOrThrow(id);
     ensureEncryptedSend(encryptionRunning: true, roomEncrypted: room.encrypted);
@@ -432,6 +489,7 @@ final class MockChatBackend implements ChatBackend {
         isOwn: true,
         status: MessageDeliveryStatus.pending,
         localId: localId,
+        forwarded: forwarded,
         canEdit: kind == MessageKind.text,
         canDelete: true,
         replyToId: replied?.id,
@@ -542,8 +600,12 @@ final class MockChatBackend implements ChatBackend {
     kind: kind ?? m.kind,
     isOwn: m.isOwn,
     status: status ?? m.status,
+    failureReason: status == null || status == MessageDeliveryStatus.failed
+        ? m.failureReason
+        : null,
     localId: m.localId,
     edited: edited ?? m.edited,
+    forwarded: m.forwarded,
     canEdit: (kind ?? m.kind) == MessageKind.text && m.canEdit,
     canDelete: (kind ?? m.kind) != MessageKind.deleted && m.canDelete,
     reactions: reactions ?? m.reactions,

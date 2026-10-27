@@ -129,6 +129,25 @@ class MessageBubble extends StatelessWidget {
                         ),
                       ),
                     ),
+                  if (message.forwarded)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 3),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.shortcut, size: 14, color: mutedColor),
+                          const SizedBox(width: 4),
+                          Text(
+                            l10n.forwarded,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontStyle: FontStyle.italic,
+                              color: mutedColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   if (message.hasReply) _ReplyPreview(message: message),
                   _content(context, l10n, mutedColor),
                   const SizedBox(height: 2),
@@ -151,6 +170,7 @@ class MessageBubble extends StatelessWidget {
                         _DeliveryIcon(
                           status: message.status,
                           color: mutedColor,
+                          l10n: l10n,
                         ),
                       ],
                     ],
@@ -158,6 +178,17 @@ class MessageBubble extends StatelessWidget {
                 ],
               ),
             ),
+            if (isFromMe && message.isFailed)
+              Padding(
+                padding: const EdgeInsets.only(right: 12, bottom: 4),
+                child: Text(
+                  l10n.notSentTapForOptions,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ),
             if (message.reactions.isNotEmpty)
               Padding(
                 padding: EdgeInsets.only(
@@ -190,12 +221,7 @@ class MessageBubble extends StatelessWidget {
       case MessageKind.text:
         return _HighlightedBody(text: message.body, query: highlightQuery);
       case MessageKind.image:
-        if (message.isPending) {
-          return _Placeholder(
-            icon: Icons.image_outlined,
-            text: message.attachmentName ?? l10n.photo,
-          );
-        }
+        // Unsent images are shown from the copy kept in the outbox.
         return _ImageAttachment(
           load: loadAttachment,
           onTap: onOpenAttachment,
@@ -204,7 +230,7 @@ class MessageBubble extends StatelessWidget {
       case MessageKind.voice:
       case MessageKind.audio:
         final load = loadAttachment;
-        if (load == null || message.isPending) {
+        if (load == null) {
           return _Placeholder(icon: Icons.mic, text: l10n.voiceMessage);
         }
         return VoiceNotePlayer(
@@ -500,19 +526,37 @@ class _ReactionChip extends StatelessWidget {
 }
 
 /// Matrix has read receipts but no delivery receipts, so there is no
-/// "delivered" tick: sending (clock), sent (one tick), read (blue ticks),
-/// failed (red).
+/// "delivered" tick: sending (clock), waiting for the connection (cloud),
+/// sent (one tick, only once the server returned the event ID), read (blue
+/// ticks), failed (red).
 class _DeliveryIcon extends StatelessWidget {
-  const _DeliveryIcon({required this.status, required this.color});
+  const _DeliveryIcon({
+    required this.status,
+    required this.color,
+    required this.l10n,
+  });
 
   final MessageDeliveryStatus status;
   final Color color;
+  final AppLocalizations l10n;
 
   @override
   Widget build(BuildContext context) {
     switch (status) {
       case MessageDeliveryStatus.pending:
-        return Icon(Icons.schedule, size: 13, color: color);
+        return Icon(
+          Icons.schedule,
+          size: 13,
+          color: color,
+          semanticLabel: l10n.sending,
+        );
+      case MessageDeliveryStatus.waitingForNetwork:
+        return Icon(
+          Icons.cloud_off_outlined,
+          size: 13,
+          color: color,
+          semanticLabel: l10n.waitingForNetwork,
+        );
       case MessageDeliveryStatus.sent:
         return Icon(Icons.done, size: 13, color: color);
       case MessageDeliveryStatus.read:

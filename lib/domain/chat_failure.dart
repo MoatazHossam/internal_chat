@@ -77,6 +77,13 @@ final class InvalidRecoveryKey extends ChatFailure {
   const InvalidRecoveryKey();
 }
 
+/// An earlier attempt to send the message may have arrived, and the server
+/// would no longer recognise a resend as the same message. Only the user can
+/// accept the risk of a duplicate.
+final class DeliveryUncertain extends ChatFailure {
+  const DeliveryUncertain();
+}
+
 /// The operation is not available in the current state (for example a
 /// verification that was already cancelled).
 final class NotAvailable extends ChatFailure {

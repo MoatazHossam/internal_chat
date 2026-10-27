@@ -60,16 +60,7 @@
   "signOutConfirmTitle": "Sign out",
   "signOutConfirmBody": "This device's messages and encryption keys will be deleted from it. To read your encrypted history again later, keep your recovery key or another verified device.",
   "cancel": "Cancel",
-  "retentionSheetTitle": "Device history retention",
-  "retentionSheetBody": "Messages older than this period are removed from this device. Full history remains available through the Web.",
   "prototypeFooter": "Internal Chat — prototype build\nNot for production use.",
-  "retentionSessionOnly": "Session only",
-  "retentionOneDay": "1 day",
-  "retentionSevenDays": "7 days",
-  "retentionThirtyDays": "30 days",
-  "retentionNinetyDays": "90 days",
-  "retentionSixMonths": "6 months",
-  "retentionOneYear": "1 year",
   "username": "Username",
   "usernameHint": "name or @name:server",
   "startingUp": "Opening secure storage…",
@@ -234,5 +225,34 @@
   "close": "Close",
   "errorUnsupportedPlatform": "This app can't run in a web browser yet: end-to-end encryption is not available there. Use the iOS or Android app.",
   "trustUnverifiedNoKeyBody": "Your account's encryption was set up on another device (for example Element) without a recovery key. Open that device and verify this one with emojis. Until then, other people's devices will not share message keys with this device.",
-  "holdToRecord": "Hold to record, release to send. Slide left to cancel."
+  "holdToRecord": "Hold to record, release to send. Slide left to cancel.",
+  "retentionNotAvailable": "Not available yet. Messages stay on this device until you sign out; signing out deletes them.",
+  "forward": "Forward",
+  "forwarded": "Forwarded",
+  "forwardTo": "Forward to",
+  "forwardSend": "Send",
+  "forwardNoDestinations": "No encrypted conversations to forward to.",
+  "forwardedToCount": "{count, plural, =1{Forwarded to 1 conversation} other{Forwarded to {count} conversations}}",
+  "@forwardedToCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "sending": "Sending…",
+  "waitingForNetwork": "Waiting for the connection. It will be sent automatically.",
+  "notSentTapForOptions": "Not sent. Tap for options.",
+  "sendAgain": "Send again",
+  "sendAgainConfirmTitle": "Send again?",
+  "sendAgainConfirmBody": "This message may already have arrived. If it did, sending it again will show it twice.",
+  "sendFailedNotAllowed": "Not sent: you can no longer post in this conversation.",
+  "sendFailedTooLarge": "Not sent: the file is larger than the server allows.",
+  "sendFailedNotEncrypted": "Not sent: this conversation is not end-to-end encrypted.",
+  "sendFailedEncryptionUnavailable": "Not sent: encryption is not available on this device.",
+  "sendFailedRejected": "Not sent: the server rejected the message.",
+  "sendFailedServer": "Not sent: the server did not accept it after several tries.",
+  "sendFailedUncertain": "It is not certain whether this message arrived. It may have been sent before the connection or the session was lost.",
+  "sendFailedNotResendable": "Not sent. This attachment can't be resent; please send it again.",
+  "errorDeliveryUncertain": "This message may already have arrived."
 }

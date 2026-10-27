@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
+import '../utilities/temporary_media.dart';
 
 /// Minimal WhatsApp-style voice-note playback control: a play/pause button,
 /// a progress bar, and an elapsed/total time label.
@@ -88,7 +88,7 @@ class _VoiceNotePlayerState extends State<VoiceNotePlayer> {
     try {
       final bytes = await widget.loadBytes();
       if (kIsWeb) return BytesSource(bytes, mimeType: widget.mimeType);
-      final directory = await getTemporaryDirectory();
+      final directory = await temporaryMediaDirectory();
       final name = 'vn-${Random.secure().nextInt(1 << 32)}${_extension()}';
       final file = File('${directory.path}/$name');
       await file.writeAsBytes(bytes, flush: true);

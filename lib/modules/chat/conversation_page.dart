@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 import '../../app_routes.dart';
@@ -17,7 +16,9 @@ import '../../domain/ids.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/chat_message.dart';
 import '../../models/conversation.dart';
+import '../../utilities/failure_messages.dart';
 import '../../utilities/message_labels.dart';
+import '../../utilities/temporary_media.dart';
 import '../../widgets/avatar_widget.dart';
 import '../../widgets/failure_listener.dart';
 import '../../widgets/message_bubble.dart';
@@ -292,9 +293,8 @@ class ConversationPage extends GetView<ChatController> {
     AppLocalizations l10n,
     ChatMessage message,
   ) {
-    final isSent = !message.isPending && !message.isFailed;
     final canInteract =
-        isSent &&
+        message.isSent &&
         message.kind != MessageKind.deleted &&
         message.kind != MessageKind.undecryptable;
 
@@ -330,13 +330,36 @@ class ConversationPage extends GetView<ChatController> {
               ),
             if (message.isFailed)
               ListTile(
-                leading: const Icon(Icons.refresh),
-                title: Text(l10n.retry),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  controller.retry(message);
-                },
+                leading: Icon(
+                  Icons.error_outline,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                title: Text(sendFailureMessage(l10n, message.failureReason)),
               ),
+            if (message.status == MessageDeliveryStatus.waitingForNetwork)
+              ListTile(
+                leading: const Icon(Icons.cloud_off_outlined),
+                title: Text(l10n.waitingForNetwork),
+              ),
+            if (message.isFailed &&
+                message.failureReason != SendFailureReason.notResendable)
+              message.failureReason == SendFailureReason.uncertain
+                  ? ListTile(
+                      leading: const Icon(Icons.send_outlined),
+                      title: Text(l10n.sendAgain),
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        _confirmSendAgain(context, l10n, message);
+                      },
+                    )
+                  : ListTile(
+                      leading: const Icon(Icons.refresh),
+                      title: Text(l10n.retry),
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        controller.retry(message);
+                      },
+                    ),
             if (canInteract)
               ListTile(
                 leading: const Icon(Icons.reply),
@@ -344,6 +367,15 @@ class ConversationPage extends GetView<ChatController> {
                 onTap: () {
                   Navigator.pop(sheetContext);
                   controller.setReplyTo(message);
+                },
+              ),
+            if (message.canForward)
+              ListTile(
+                leading: const Icon(Icons.shortcut),
+                title: Text(l10n.forward),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _forward(context, l10n, message);
                 },
               ),
             if (message.kind == MessageKind.text)
@@ -396,7 +428,7 @@ class ConversationPage extends GetView<ChatController> {
     AppLocalizations l10n,
     ChatMessage message,
   ) async {
-    // Unsent messages are simply discarded; nothing reached the server.
+    // Unsent messages are only removed from this device's outbox.
     if (message.isFailed || message.isPending) {
       await controller.delete(message);
       return;
@@ -422,6 +454,62 @@ class ConversationPage extends GetView<ChatController> {
       ),
     );
     if (confirmed == true) await controller.delete(message);
+  }
+
+  /// The server can no longer recognise this message as a repeat, so the
+  /// user decides whether a possible duplicate is acceptable.
+  Future<void> _confirmSendAgain(
+    BuildContext context,
+    AppLocalizations l10n,
+    ChatMessage message,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l10n.sendAgainConfirmTitle),
+        content: Text(l10n.sendAgainConfirmBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(l10n.sendAgain),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await controller.retry(message, acceptDuplicateRisk: true);
+    }
+  }
+
+  Future<void> _forward(
+    BuildContext context,
+    AppLocalizations l10n,
+    ChatMessage message,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final destinations = controller.forwardDestinations;
+    if (destinations.isEmpty) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.forwardNoDestinations)),
+      );
+      return;
+    }
+    final selected = await showModalBottomSheet<List<ConversationId>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _ForwardSheet(destinations: destinations, l10n: l10n),
+    );
+    if (selected == null || selected.isEmpty) return;
+    final queued = await controller.forward(message, selected);
+    if (queued > 0) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.forwardedToCount(queued))),
+      );
+    }
   }
 
   Future<void> _openAttachment(
@@ -813,7 +901,7 @@ class _InputBarState extends State<_InputBar> {
       return;
     }
 
-    final dir = await getTemporaryDirectory();
+    final dir = await temporaryMediaDirectory();
     final path =
         '${dir.path}/voice-${DateTime.now().millisecondsSinceEpoch}.m4a';
 
@@ -1245,5 +1333,84 @@ class _DateSeparator extends StatelessWidget {
 
     final locale = Localizations.localeOf(context).toString();
     return DateFormat.yMMMd(locale).format(dt);
+  }
+}
+
+/// Picks one or more encrypted conversations to forward a message to.
+class _ForwardSheet extends StatefulWidget {
+  const _ForwardSheet({required this.destinations, required this.l10n});
+
+  final List<Conversation> destinations;
+  final AppLocalizations l10n;
+
+  @override
+  State<_ForwardSheet> createState() => _ForwardSheetState();
+}
+
+class _ForwardSheetState extends State<_ForwardSheet> {
+  final _selected = <ConversationId>{};
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = widget.l10n;
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.7,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Text(
+                l10n.forwardTo,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
+            ),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final conversation in widget.destinations)
+                    CheckboxListTile(
+                      value: _selected.contains(conversation.id),
+                      onChanged: (checked) => setState(() {
+                        if (checked ?? false) {
+                          _selected.add(conversation.id);
+                        } else {
+                          _selected.remove(conversation.id);
+                        }
+                      }),
+                      secondary: AvatarWidget(
+                        name: conversation.title,
+                        radius: 20,
+                      ),
+                      title: Text(
+                        conversation.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: FilledButton.icon(
+                onPressed: _selected.isEmpty
+                    ? null
+                    : () => Navigator.pop(context, _selected.toList()),
+                icon: const Icon(Icons.send),
+                label: Text(l10n.forwardSend),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

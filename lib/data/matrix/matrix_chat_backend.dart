@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_vodozemac/flutter_vodozemac.dart' as vod;
 import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart' show Database;
 
 import '../../domain/chat_backend.dart';
 import '../../domain/chat_failure.dart';
@@ -16,10 +17,16 @@ import '../../models/chat_message.dart';
 import '../../models/conversation.dart';
 import '../../models/user.dart' as domain;
 import '../../utilities/streams.dart';
+import '../../utilities/temporary_media.dart';
 import 'matrix_errors.dart';
 import 'matrix_mappers.dart';
 import 'matrix_store.dart';
 import 'matrix_verification.dart';
+import 'outbox/forward_content.dart';
+import 'outbox/matrix_outbox_transport.dart';
+import 'outbox/outbox_entry.dart';
+import 'outbox/outbox_store.dart';
+import 'outbox/outbox_worker.dart';
 
 /// The only class in the app that uses the Matrix SDK. Everything it returns
 /// or throws is a domain type, so this file plus `data/matrix/` is all that
@@ -52,8 +59,11 @@ final class MatrixChatBackend implements ChatBackend {
   final _answeredUia = Expando<bool>();
 
   final _timelines = <String, Timeline>{};
-  final _autoRetried = <String>{};
   int? _maxUploadBytes;
+
+  /// Messages not sent yet, for every conversation. Created with the client.
+  OutboxWorker? _outbox;
+  Database? _outboxDatabase;
 
   // ---------------------------------------------------------------------------
   // ChatSession
@@ -121,6 +131,9 @@ final class MatrixChatBackend implements ChatBackend {
       _client = null;
       _opening = null;
       await _detach();
+      final outbox = _outbox;
+      _outbox = null;
+      outbox?.reset();
       try {
         // Uploads keys to the backup, tells the server, and clears the local
         // store even when the server call fails.
@@ -130,14 +143,18 @@ final class MatrixChatBackend implements ChatBackend {
       }
       try {
         await client.dispose();
+        await _outboxDatabase?.close();
       } catch (_) {
         // Closing is best effort; the client is discarded either way.
       }
+      _outboxDatabase = null;
       try {
-        await deleteEncryptedMatrixStore(clientName);
+        // Unsent messages are deleted with the rest of this user's data.
+        await deleteEncryptedStores(clientName);
       } catch (_) {
         // The store was cleared by logout(); removing the file is best effort.
       }
+      await deleteTemporaryMedia();
     }
     _offline = false;
     _maxUploadBytes = null;
@@ -244,12 +261,13 @@ final class MatrixChatBackend implements ChatBackend {
     late final StreamController<List<ChatMessage>> controller;
     Timeline? timeline;
     StreamSubscription<SyncUpdate>? receipts;
+    StreamSubscription<void>? outboxChanges;
     var cancelled = false;
 
     void emit() {
       final current = timeline;
       if (current != null && !controller.isClosed) {
-        controller.add(mapTimeline(current));
+        controller.add(_messagesOf(current));
       }
     }
 
@@ -273,6 +291,7 @@ final class MatrixChatBackend implements ChatBackend {
           receipts = room.client.onSync.stream
               .where((sync) => _touchesRoom(sync, id.value))
               .listen((_) => emit());
+          outboxChanges = _outbox?.changes.listen((_) => emit());
         } catch (error) {
           if (!controller.isClosed) controller.addError(toChatFailure(error));
         }
@@ -280,6 +299,7 @@ final class MatrixChatBackend implements ChatBackend {
       onCancel: () async {
         cancelled = true;
         await receipts?.cancel();
+        await outboxChanges?.cancel();
         final current = timeline;
         if (current != null) {
           current.cancelSubscriptions();
@@ -310,6 +330,11 @@ final class MatrixChatBackend implements ChatBackend {
     ).distinct(listEquals);
   }
 
+  // Text, files, voice notes and forwards go through the outbox: stored
+  // encrypted before the first attempt, sent in order per conversation, and
+  // retried across restarts with the same transaction ID (the
+  // LocalMessageId), so the server can drop repeats.
+
   @override
   Future<void> sendText(
     ConversationId id,
@@ -319,18 +344,10 @@ final class MatrixChatBackend implements ChatBackend {
   }) => _run(() async {
     final room = _room(id);
     _ensureCanSend(room);
-    final inReplyTo = replyTo == null
-        ? null
-        : await _event(room, replyTo.messageId);
-    // The transaction ID is the LocalMessageId, so every retry of this
-    // message reuses it and the server deduplicates.
-    await room.sendTextEvent(
-      text,
-      txid: localId.value,
-      inReplyTo: inReplyTo,
-      parseCommands: false,
-      parseMarkdown: false,
-    );
+    await _enqueue(room, OutboxKind.text, localId, {
+      'body': text,
+      'replyTo': ?replyTo?.messageId,
+    });
   });
 
   @override
@@ -343,19 +360,12 @@ final class MatrixChatBackend implements ChatBackend {
     final room = _room(id);
     _ensureCanSend(room);
     await _ensureWithinUploadLimit(file.bytes.length);
-    final inReplyTo = replyTo == null
-        ? null
-        : await _event(room, replyTo.messageId);
-    // The SDK encrypts the file (AES-256-CTR) before uploading it.
-    await room.sendFileEvent(
-      MatrixFile.fromMimeType(
-        bytes: file.bytes,
-        name: file.name,
-        mimeType: file.mimeType,
-      ),
-      txid: localId.value,
-      inReplyTo: inReplyTo,
-    );
+    await _enqueue(room, OutboxKind.file, localId, {
+      'name': file.name,
+      'mimeType': ?file.mimeType,
+      'size': file.bytes.length,
+      'replyTo': ?replyTo?.messageId,
+    }, file: file.bytes);
   });
 
   @override
@@ -368,37 +378,88 @@ final class MatrixChatBackend implements ChatBackend {
     final room = _room(id);
     _ensureCanSend(room);
     await _ensureWithinUploadLimit(file.bytes.length);
-    final milliseconds = duration.inMilliseconds;
-    await room.sendFileEvent(
-      MatrixAudioFile(
-        bytes: file.bytes,
-        name: file.name,
-        mimeType: file.mimeType ?? 'audio/mp4',
-        duration: milliseconds,
-      ),
-      txid: localId.value,
-      // MSC3245 voice-message markers, as Element sends them.
-      extraContent: {
-        'org.matrix.msc3245.voice': <String, Object?>{},
-        'org.matrix.msc1767.audio': {'duration': milliseconds},
-      },
-    );
+    await _enqueue(room, OutboxKind.voice, localId, {
+      'name': file.name,
+      'mimeType': file.mimeType ?? 'audio/mp4',
+      'size': file.bytes.length,
+      'durationMs': duration.inMilliseconds,
+    }, file: file.bytes);
   });
 
   @override
-  Future<void> retry(MessageRef ref) => _run(() async {
+  Future<void> forward(
+    MessageRef source,
+    ConversationId destination, {
+    required LocalMessageId localId,
+  }) => _run(() async {
+    final target = _room(destination);
+    _ensureCanSend(target);
+    final room = _room(source.conversationId);
+    final event = await _requireEvent(room, source.messageId);
+    if (!event.status.isSent || event.redacted) throw const NotAvailable();
+    final timeline = _timelines[room.id];
+    final display = timeline == null ? event : event.getDisplayEvent(timeline);
+    // Undecryptable events are still of type m.room.encrypted.
+    if (display.type != EventTypes.Message) throw const NotAvailable();
+    final content = forwardContent(display.content);
+    if (content == null) throw const NotAvailable();
+    await _enqueue(target, OutboxKind.forward, localId, {'content': content});
+  });
+
+  @override
+  Future<void> retry(MessageRef ref, {bool acceptDuplicateRisk = false}) =>
+      _run(() async {
+        final outbox = _requireOutbox();
+        final entry = outbox.entry(ref.messageId);
+        if (entry != null) {
+          if (entry.state != OutboxState.failed) return;
+          if (entry.lastError == SendErrorClass.uncertain) {
+            if (!acceptDuplicateRisk) throw const DeliveryUncertain();
+            // A new message from this device: the old transaction ID may
+            // belong to another device or be past the server's 24 hours.
+            await outbox.retry(
+              entry.txnId,
+              newTxnId: LocalMessageId.generate().value,
+            );
+          } else {
+            await outbox.retry(entry.txnId);
+          }
+          return;
+        }
+        await _retryLegacyEcho(ref);
+      });
+
+  /// A failed local echo stored by the SDK (sent by an earlier version of
+  /// the app). Text moves into the outbox with its transaction ID; attachment
+  /// bytes were never kept, so those cannot be resent.
+  Future<void> _retryLegacyEcho(MessageRef ref) async {
     final room = _room(ref.conversationId);
-    _ensureCanSend(room);
     final event = await _event(room, ref.messageId);
     if (event == null || !event.status.isError) throw const NotAvailable();
-    try {
-      await event.sendAgain();
-    } on FileNoLongerInCacheException {
-      // Attachments are not kept on disk, so a failed upload cannot be
-      // resent; the user has to pick the file again.
-      throw const NotAvailable();
-    }
-  });
+    if (kindOf(event) != MessageKind.text) throw const NotAvailable();
+    _ensureCanSend(room);
+    final client = room.client;
+    final txnId = event.transactionId ?? event.eventId;
+    final entry = OutboxEntry(
+      txnId: txnId,
+      userId: client.userID!,
+      deviceId: client.deviceID!,
+      roomId: room.id,
+      kind: OutboxKind.text,
+      payload: {
+        'body': stripReplyFallback(event.body),
+        'replyTo': ?event.inReplyToEventId(),
+      },
+      createdAt: event.originServerTs,
+      // It may have reached the server: reconcile like any other attempt.
+      attempts: 1,
+      firstAttemptAt: event.originServerTs,
+      lastAttemptAt: event.originServerTs,
+    );
+    await _requireOutbox().enqueue(entry);
+    await client.database.removeEvent(event.eventId, room.id);
+    client.onCancelSendEvent.add(event.eventId);
+  }
 
   @override
   Future<void> toggleReaction(MessageRef ref, String key) => _run(() async {
@@ -443,6 +504,13 @@ final class MatrixChatBackend implements ChatBackend {
 
   @override
   Future<void> delete(MessageRef ref) => _run(() async {
+    final outbox = _outbox;
+    if (outbox?.entry(ref.messageId) != null) {
+      // Not sent: removes it from the outbox. Refused while it is being
+      // sent, because that attempt may still arrive.
+      if (!await outbox!.discard(ref.messageId)) throw const NotAvailable();
+      return;
+    }
     final room = _room(ref.conversationId);
     final event = await _requireEvent(room, ref.messageId);
     if (!event.status.isSent) {
@@ -479,6 +547,8 @@ final class MatrixChatBackend implements ChatBackend {
     bool thumbnail = false,
   }) => _run(() async {
     final room = _room(ref.conversationId);
+    final pending = _outbox?.entry(ref.messageId);
+    if (pending != null) return _pendingAttachment(room, pending, thumbnail);
     final event = await _requireEvent(room, ref.messageId);
     final timeline = _timelines[room.id];
     final display = timeline == null ? event : event.getDisplayEvent(timeline);
@@ -490,12 +560,44 @@ final class MatrixChatBackend implements ChatBackend {
     return file.bytes;
   });
 
+  /// The attachment of a message that is not sent yet: the stored file, or
+  /// for a forward the original encrypted media.
+  Future<Uint8List> _pendingAttachment(
+    Room room,
+    OutboxEntry entry,
+    bool thumbnail,
+  ) async {
+    if (entry.hasFile) {
+      return await _requireOutbox().file(entry.txnId) ??
+          (throw const NotAvailable());
+    }
+    final content = entry.forwardContent;
+    if (content == null) throw const NotAvailable();
+    final event = Event(
+      content: content,
+      type: EventTypes.Message,
+      eventId: entry.txnId,
+      senderId: entry.userId,
+      originServerTs: entry.createdAt,
+      room: room,
+      status: EventStatus.sent,
+    );
+    final file = await event.downloadAndDecryptAttachment(
+      getThumbnail: thumbnail && event.hasThumbnail,
+    );
+    return file.bytes;
+  }
+
   @override
   Future<int?> maxUploadBytes() async {
     final cached = _maxUploadBytes;
     if (cached != null) return cached;
     try {
-      final config = await _requireClient().getConfig();
+      // Short limit: a file is queued without the check while offline, and
+      // a later upload above the limit fails with a clear reason.
+      final config = await _requireClient().getConfig().timeout(
+        const Duration(seconds: 5),
+      );
       return _maxUploadBytes = config.mUploadSize;
     } catch (_) {
       return null;
@@ -626,10 +728,10 @@ final class MatrixChatBackend implements ChatBackend {
     } catch (_) {
       throw const EncryptionUnavailable();
     }
-    final database = await openEncryptedMatrixStore(clientName);
+    final stores = await openEncryptedStores(clientName);
     final client = Client(
       clientName,
-      database: database,
+      database: stores.sdk,
       supportedLoginTypes: {AuthenticationTypes.password},
       verificationMethods: {
         KeyVerificationMethod.emoji,
@@ -645,10 +747,18 @@ final class MatrixChatBackend implements ChatBackend {
       // Requests refresh tokens at sign-in and renews the access token when
       // the server reports it expired.
       onSoftLogout: (client) => client.refreshAccessToken(),
-      // Keeps retrying a message while offline before marking it failed.
+      // Only reactions, edits and redactions still use the SDK's own send
+      // queue; messages go through the outbox.
       sendTimelineEventTimeout: const Duration(minutes: 2),
       // Uploads of up to 25 MiB must not time out on slow networks.
       defaultNetworkRequestTimeout: const Duration(minutes: 5),
+    );
+    _outboxDatabase = stores.outbox;
+    _outbox = OutboxWorker(
+      store: await SqliteOutboxStore.open(stores.outbox),
+      transport: MatrixOutboxTransport(client, isOnline: () => !_offline),
+      // Transaction-ID prefix and error class only, never content.
+      log: kDebugMode ? debugPrint : null,
     );
     _attach(client);
     return client;
@@ -682,14 +792,16 @@ final class MatrixChatBackend implements ChatBackend {
             final wasOffline = _offline;
             _offline = false;
             _setSession(SessionState(SessionStatus.ready, user: _session.user));
-            if (wasOffline) _retryFailedSends(client);
+            if (wasOffline) _outbox?.networkRestored();
           case SyncStatus.error:
             final exception = update.error?.exception;
             if (exception != null && toChatFailure(exception) is Offline) {
+              final wasOffline = _offline;
               _offline = true;
               _setSession(
                 SessionState(SessionStatus.offline, user: _session.user),
               );
+              if (!wasOffline) _outbox?.connectionLost();
             }
           default:
             break;
@@ -702,6 +814,16 @@ final class MatrixChatBackend implements ChatBackend {
             sync.deviceLists?.changed?.contains(me) ?? false;
         if (accountDataChanged || ownDevicesChanged) {
           unawaited(_refreshTrustQuietly(client));
+        }
+      }),
+      // An event with one of our transaction IDs came back through sync: an
+      // attempt whose response was lost did arrive.
+      client.onTimelineEvent.stream.listen((event) {
+        final txnId = event.transactionId;
+        if (txnId != null &&
+            event.status.isSynced &&
+            event.senderId == client.userID) {
+          unawaited(_outbox?.markDelivered(txnId));
         }
       }),
       client.onKeyVerificationRequest.stream.listen((verification) {
@@ -731,11 +853,15 @@ final class MatrixChatBackend implements ChatBackend {
         ? SessionStatus.connecting
         : SessionStatus.ready;
     _setSession(SessionState(status, user: user));
+    unawaited(_outbox?.start());
     unawaited(_loadOwnProfile(client));
     unawaited(_refreshTrustQuietly(client));
   }
 
   void _onSignedOut() {
+    // Session lost (not a user sign-out): unsent messages stay stored and
+    // are reconsidered after the next sign-in.
+    _outbox?.stop();
     for (final timeline in _timelines.values) {
       timeline.cancelSubscriptions();
     }
@@ -867,23 +993,55 @@ final class MatrixChatBackend implements ChatBackend {
     if (max != null && bytes > max) throw TooLarge(maxBytes: max);
   }
 
-  /// After reconnecting, sends failed messages in open conversations again.
-  /// `sendAgain` reuses each message's transaction ID, so a message that did
-  /// reach the server before the connection dropped is not duplicated.
-  void _retryFailedSends(Client client) {
-    for (final timeline in _timelines.values.toList()) {
-      final room = timeline.room;
-      if (!room.encrypted || !client.encryptionEnabled) continue;
-      for (final event in timeline.events.toList()) {
-        if (!event.status.isError || event.senderId != client.userID) {
-          continue;
-        }
-        final key = event.transactionId ?? event.eventId;
-        if (!_autoRetried.add(key)) continue;
-        unawaited(event.sendAgain().then<void>((_) {}, onError: (Object _) {}));
-      }
-    }
+  Future<void> _enqueue(
+    Room room,
+    OutboxKind kind,
+    LocalMessageId localId,
+    Map<String, Object?> payload, {
+    Uint8List? file,
+  }) {
+    final client = room.client;
+    return _requireOutbox().enqueue(
+      OutboxEntry(
+        txnId: localId.value,
+        userId: client.userID!,
+        deviceId: client.deviceID!,
+        roomId: room.id,
+        kind: kind,
+        payload: payload,
+        createdAt: DateTime.now(),
+        hasFile: file != null,
+      ),
+      file: file,
+    );
   }
+
+  /// The timeline plus this room's unsent messages, newest first.
+  List<ChatMessage> _messagesOf(Timeline timeline) {
+    final messages = mapTimeline(timeline);
+    final outbox = _outbox;
+    final entries = outbox?.entriesForRoom(timeline.room.id) ?? const [];
+    if (outbox == null || entries.isEmpty) return messages;
+    // Already in the timeline under the server's event ID.
+    final delivered = {
+      for (final event in timeline.events)
+        if (event.status.isSent) ?event.transactionId,
+    };
+    final pending = entries.where((e) => !delivered.contains(e.txnId));
+    final pendingIds = {for (final entry in entries) entry.txnId};
+    return [
+      ...mapOutbox(
+        pending,
+        timeline,
+        online: !_offline,
+        isInFlight: outbox.isInFlight,
+      ),
+      // Drops an SDK echo of a message that moved into the outbox.
+      ...messages.where((message) => !pendingIds.contains(message.id)),
+    ];
+  }
+
+  OutboxWorker _requireOutbox() => _outbox ?? (throw const NotAvailable());
 
   List<Conversation> _conversations(Client client) => [
     for (final room in client.rooms)
