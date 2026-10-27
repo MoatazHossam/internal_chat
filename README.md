@@ -72,7 +72,7 @@ This conflicts with the "Proprietary" statement in the [License](#license) secti
 | URL previews | Disabled |
 | Media | Authenticated media only (`/_matrix/client/v1/media`). Upload limit read at runtime from `/v1/media/config` (25 MiB on the POC) |
 | Rate limits | `429 M_LIMIT_EXCEEDED` with `retry_after_ms` |
-| Push | Requires a push gateway the organization controls; not deployed yet |
+| Push | Through a push gateway the organization controls (Sygnal). The app side is implemented; the gateway is not deployed yet |
 
 ## Functional Scope
 
@@ -89,13 +89,13 @@ Implemented on the Matrix backend:
 * In-conversation message search (loaded messages)
 * Offline sending through a persistent encrypted outbox (text, images, files, voice notes), retried automatically without duplicates
 * Forwarding text, images, files and voice notes to one or more conversations
+* Push notifications with a generic "New message" (APNs directly on iOS, FCM on Android); needs the push gateway and the organization's Apple/Firebase accounts before it works
 * Device verification (emoji/SAS), recovery key, and online key backup
 
 Not available or not applicable:
 
 * **Delivery receipts:** Matrix has none; the app shows read receipts only.
 * **Presence/online status:** disabled on the server; the app shows none.
-* **Push notifications:** need a push gateway (see below).
 * **Full plaintext server history:** see [Server History](#server-history).
 
 ## Explicitly Excluded
@@ -276,15 +276,15 @@ Details, retry rules and test status: [`docs/matrix_integration.md`](docs/matrix
 * **Forwarding** sends a new encrypted message to each chosen conversation, with its own ID. Text keeps only its body (no reply or edit relation); images, files and voice notes reuse the original encrypted file and key, so nothing is uploaded again. Copies show "Forwarded" (a UI-only marker).
 * **Not covered:** nothing is sent while the OS suspends the app (no background sending).
 
-## Push Notifications (needs new infrastructure)
+## Push Notifications
 
-Not implemented. The stock Element apps use Element's own push gateway and credentials, which another app cannot use. `internal_chat` needs:
+Implemented in the app; **not working yet** until the organization deploys the push gateway and supplies its accounts. Setup checklist, privacy details and what is untested: [`docs/push_notifications.md`](docs/push_notifications.md).
 
-1. Its own Firebase project (FCM) and APNs key.
-2. A push gateway the organization controls, for example Sygnal (Apache-2.0). This expands the server stack and **needs owner approval**.
-3. Pusher registration with `format: event_id_only`, then fetching and decrypting the event on the device.
-
-Lock-screen text must stay generic (for example "New message"): no content or sender.
+* Synapse → **Sygnal** (a push gateway the organization runs; this adds a server and **needs owner approval**) → Apple (APNs, used directly on iOS, no Google SDK there) or Google (FCM on Android) → phone. A configuration template is in [`docs/push/sygnal.yaml`](docs/push/sygnal.yaml).
+* The pusher uses `format: event_id_only`: pushes carry only the room ID, event ID and unread counts. The lock screen shows only **"New message"** in the app's language, never the sender or content. Tapping it opens the conversation.
+* The app registers after sign-in, at each start, on a new token and on a language change. Without `--dart-define=PUSH_GATEWAY_URL=…` push is off; without `android/app/google-services.json` (not committed) Android builds without push.
+* To replace with real accounts: bundle/application IDs, Apple push key, Firebase project and service account, gateway URL. The Apple key and the service account go to the gateway, never into the app or this repository.
+* Stock Element apps cannot be reused for this: they use Element's own gateway and credentials.
 
 ## Device Retention
 
@@ -413,7 +413,7 @@ The security team must approve:
 
 * AGPL licence for the Matrix SDK (see [Licence](#licence-decision-pending))
 * Threat model
-* Push gateway deployment and notification content
+* Push gateway deployment (Sygnal) and the generic notification text
 * Loss of server-side plaintext history under end-to-end encryption
 * Recovery-key handling guidance for users
 * TLS and certificate policy
@@ -470,7 +470,7 @@ git status --short
 Platform notes:
 
 * **iOS:** `flutter_vodozemac` ships a prebuilt xcframework through Swift Package Manager (the default on current Flutter). With CocoaPods it is compiled from Rust instead.
-* **Android:** `flutter_vodozemac` is compiled from Rust during the build, so the machine and CI need a Rust toolchain (`rustup`).
+* **Android:** `flutter_vodozemac` is compiled from Rust during the build, so the machine and CI need a Rust toolchain (`rustup`). With Homebrew's `rustup`, put `/opt/homebrew/opt/rustup/bin` on `PATH`, otherwise the build fails with "could not execute process `rustc -vV`".
 * **SQLCipher:** `package:sqlite3` downloads its prebuilt SQLCipher libraries during the build (see `hooks:` in `pubspec.yaml`).
 
 If a tool is unavailable, report that clearly. Never claim a check passed when it was not executed.
@@ -479,7 +479,7 @@ If a tool is unavailable, report that clearly. Never claim a check passed when i
 
 Full breakdown and dates: [`docs/matrix_integration.md`](docs/matrix_integration.md#test-status-2026-10-27).
 
-**Automated (run on 2026-10-27): 92 tests, all passing**, plus `flutter analyze` (no issues) and `dart format` (no changes). They run on the development machine against fakes, in-memory SQLite and real SDK objects. None of them talks to the server or runs on a simulator or phone.
+**Automated (run on 2026-10-27): 107 tests, all passing**, plus `flutter analyze` (no issues) and `dart format` (no changes). They run on the development machine against fakes, in-memory SQLite and real SDK objects. None of them talks to the server or runs on a simulator or phone.
 
 * Outbox worker against a fake server that deduplicates per device and transaction ID: retries, lost responses, offline and reconnect, token refresh, rate limits, ordering, restarts, new devices, the 23-hour window, and an idle timer while sending
 * History search (empty intermediate pages, end of history, cutoff, page budget)
@@ -487,11 +487,12 @@ Full breakdown and dates: [`docs/matrix_integration.md`](docs/matrix_integration
 * Local store: data without its key is never replaced automatically
 * Mapper tests against real SDK `Room`/`Event`/`Timeline` objects (read receipts, edits, reactions, forwarded marker, unsent messages)
 * Controller tests through the domain contracts (chat, forwarding, "send again" confirmation, sign-in, startup errors and reset)
+* Push: when the app registers (sign-in, token, language), the generic text, refused permission, taps, and the pusher and gateway-URL rules
 * Domain, error-mapping, failure-text and test-fixture contract tests
 
 **On simulators:** sign-in, sync and session restore passed on iOS simulators (2026-10-20); installing the outbox build over an existing install kept the session and history (2026-10-26).
 
-**Not tested yet on a simulator or phone:** offline sending and reconnecting after more than five minutes, leaving the conversation while sending, restarting with queued messages, attachment retries, duplicate prevention against the real server, forwarding between real clients (Flutter and Element), voice-note recording, the start-screen reset, the redesigned interface, and anything on Android. **Nothing has been tested on a physical phone.**
+**Not tested yet on a simulator or phone:** offline sending and reconnecting after more than five minutes, leaving the conversation while sending, restarting with queued messages, attachment retries, duplicate prevention against the real server, forwarding between real clients (Flutter and Element), voice-note recording, the start-screen reset, the redesigned interface, push notifications (no gateway or accounts yet), and anything on an Android device. **Nothing has been tested on a physical phone.**
 
 ## Definition of Done
 
@@ -627,7 +628,7 @@ Recommended next step:
 * Offline sending through a persistent encrypted outbox, and forwarding
 * Encrypted local storage
 * Attachments
-* Push notifications (needs a push gateway)
+* Push notifications (app side implemented; gateway and accounts pending)
 * Device-retention settings
 * Web support with end-to-end encryption (needs vodozemac WASM)
 * MDM integration
@@ -648,7 +649,7 @@ Recommended next step:
 The following remain unresolved:
 
 * AGPL licence of the Matrix SDK, or a switch to a `matrix-rust-sdk` bridge
-* Push gateway (Sygnal or similar), FCM/APNs credentials, or UnifiedPush on Android
+* Deploying the push gateway (Sygnal) and creating the APNs key and Firebase project
 * Full server history versus end-to-end encryption
 * Web end-to-end encryption (vodozemac WASM build)
 * Certificate pinning or enterprise-CA strategy

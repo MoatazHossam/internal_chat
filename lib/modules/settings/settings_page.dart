@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../app_routes.dart';
 import '../../l10n/app_localizations.dart';
@@ -7,6 +8,7 @@ import '../../styles/status_colors.dart';
 import '../../styles/tokens.dart';
 import '../../widgets/avatar_widget.dart';
 import '../../widgets/section_card.dart';
+import '../push/push_controller.dart';
 import 'settings_controller.dart';
 
 class SettingsPage extends GetView<SettingsController> {
@@ -78,6 +80,12 @@ class SettingsPage extends GetView<SettingsController> {
             ],
           ),
           const SizedBox(height: Insets.xl),
+          if (Get.isRegistered<PushController>()) ...[
+            SectionCard(
+              children: [_NotificationsTile(push: Get.find<PushController>())],
+            ),
+            const SizedBox(height: Insets.xl),
+          ],
           SectionCard(
             title: l10n.appearance,
             children: [
@@ -214,6 +222,56 @@ class SettingsPage extends GetView<SettingsController> {
         ],
       ),
     );
+  }
+}
+
+/// Whether push notifications work on this device, and the way to fix it
+/// when they do not.
+class _NotificationsTile extends StatelessWidget {
+  const _NotificationsTile({required this.push});
+
+  final PushController push;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final scheme = Theme.of(context).colorScheme;
+    return Obx(() {
+      final status = push.status.value;
+      final (text, color, onTap) = switch (status) {
+        PushStatus.on => (l10n.notificationsOn, null, null),
+        PushStatus.notConfigured => (
+          l10n.notificationsNotConfigured,
+          scheme.onSurfaceVariant,
+          null,
+        ),
+        PushStatus.pending => (l10n.notificationsPending, null, null),
+        PushStatus.denied => (
+          l10n.notificationsDenied,
+          scheme.error,
+          openAppSettings,
+        ),
+        PushStatus.unavailable => (
+          l10n.notificationsUnavailable,
+          scheme.error,
+          () => push.updateRegistration(force: true),
+        ),
+      };
+      return ListTile(
+        leading: TileIcon(
+          status == PushStatus.on
+              ? Icons.notifications_active_outlined
+              : Icons.notifications_off_outlined,
+          color: color,
+        ),
+        title: Text(l10n.notifications),
+        subtitle: Text(text),
+        trailing: onTap == null
+            ? null
+            : const Icon(Icons.chevron_right_rounded),
+        onTap: onTap,
+      );
+    });
   }
 }
 

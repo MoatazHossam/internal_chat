@@ -3,6 +3,8 @@
          only to debug/profile manifests. -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- Android 13+: asked at sign-in, for push notifications. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- No backups: the message store is encrypted with a Keystore key that
          does not leave the device, and keys must not end up in backups. -->
     <application
@@ -34,6 +36,17 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Push notifications (FCM data messages from the push gateway). -->
+        <service
+            android:name=".PushMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT"/>
+            </intent-filter>
+        </service>
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="messages" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

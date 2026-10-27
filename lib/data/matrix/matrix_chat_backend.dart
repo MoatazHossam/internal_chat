@@ -7,10 +7,12 @@ import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart' show Database;
 
+import '../../constants.dart';
 import '../../domain/chat_backend.dart';
 import '../../domain/chat_failure.dart';
 import '../../domain/device_trust_state.dart';
 import '../../domain/ids.dart';
+import '../../domain/push.dart';
 import '../../domain/send_guard.dart';
 import '../../domain/session_state.dart';
 import '../../models/chat_message.dart';
@@ -20,6 +22,7 @@ import '../../utilities/streams.dart';
 import '../../utilities/temporary_media.dart';
 import 'matrix_errors.dart';
 import 'matrix_mappers.dart';
+import 'matrix_push.dart';
 import 'matrix_store.dart';
 import 'matrix_verification.dart';
 import 'outbox/forward_content.dart';
@@ -34,10 +37,13 @@ import 'outbox/outbox_worker.dart';
 final class MatrixChatBackend implements ChatBackend {
   MatrixChatBackend({
     required Uri homeserver,
+    PushConfiguration? push,
     this.clientName = 'internal_chat',
-  }) : _homeserver = homeserver;
+  }) : _homeserver = homeserver,
+       _push = push;
 
   final Uri _homeserver;
+  final PushConfiguration? _push;
   final String clientName;
 
   Client? _client;
@@ -714,6 +720,36 @@ final class MatrixChatBackend implements ChatBackend {
     return MatrixVerificationRequest(
       verification,
       onDone: () => _afterVerification(client),
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // PushRegistration
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<void> registerPush(
+    PushToken token, {
+    required String alertText,
+    required String languageCode,
+  }) => _run(() async {
+    final push = _push;
+    if (push == null) throw const NotAvailable();
+    // Replaces this pushkey's pusher for any other account on the gateway
+    // (append: false), so one device never gets another user's pushes.
+    // Synapse removes the pusher when this device signs out.
+    await _requireClient().postPusher(
+      Pusher.fromJson(
+        pusherJson(
+          token,
+          push,
+          alertText: alertText,
+          languageCode: languageCode,
+          deviceDisplayName: _deviceDisplayName,
+          production: kReleaseMode,
+        ),
+      ),
+      append: false,
     );
   });
 

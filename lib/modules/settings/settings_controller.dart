@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import '../../domain/chat_backend.dart';
 import '../../models/user.dart';
 import '../../services/locale_service.dart';
+import '../push/push_controller.dart';
 
 class SettingsController extends GetxController {
   SettingsController(this._session);
@@ -30,6 +31,10 @@ class SettingsController extends GetxController {
     locale.value = value;
     await LocaleService.set(value);
     Get.updateLocale(value);
+    // The lock-screen text is registered in the user's language.
+    if (Get.isRegistered<PushController>()) {
+      await Get.find<PushController>().updateRegistration();
+    }
   }
 
   /// Deletes this device's local data and keys. The session controller

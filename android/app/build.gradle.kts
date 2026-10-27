@@ -42,3 +42,17 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Push notifications through FCM: the messaging client only, no
+    // analytics.
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-messaging")
+    implementation("androidx.core:core-ktx:1.13.1")
+}
+
+// The Firebase project for push (see docs/push_notifications.md). Without
+// this file the app builds and runs without push notifications.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}

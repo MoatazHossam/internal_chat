@@ -1,3 +1,4 @@
+import '../constants.dart';
 import '../domain/chat_backend.dart';
 import '../domain/chat_failure.dart';
 import '../domain/device_trust_state.dart';
@@ -6,7 +7,7 @@ import '../domain/session_state.dart';
 /// Web builds: the Matrix adapter needs FFI (vodozemac, SQLCipher), which the
 /// browser does not have, and `flutter_vodozemac` has no WASM build yet.
 /// Startup stops with a clear message instead of showing anything else.
-ChatBackend createMatrixBackend(Uri homeserver) =>
+ChatBackend createMatrixBackend(Uri homeserver, {PushConfiguration? push}) =>
     const UnsupportedPlatformBackend();
 
 final class UnsupportedPlatformBackend implements ChatBackend {

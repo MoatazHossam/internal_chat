@@ -5,6 +5,7 @@ import 'package:internal_chat/domain/chat_backend.dart';
 import 'package:internal_chat/domain/chat_failure.dart';
 import 'package:internal_chat/domain/device_trust_state.dart';
 import 'package:internal_chat/domain/ids.dart';
+import 'package:internal_chat/domain/push.dart';
 import 'package:internal_chat/domain/send_guard.dart';
 import 'package:internal_chat/domain/session_state.dart';
 import 'package:internal_chat/models/chat_message.dart';
@@ -86,6 +87,16 @@ final class MockChatBackend implements ChatBackend {
 
   @override
   Future<void> resetLocalData() async {}
+
+  /// Push registrations, in order.
+  final pushRegistrations = <(PushToken, String, String)>[];
+
+  @override
+  Future<void> registerPush(
+    PushToken token, {
+    required String alertText,
+    required String languageCode,
+  }) async => pushRegistrations.add((token, alertText, languageCode));
 
   @override
   Future<void> signOut() async {

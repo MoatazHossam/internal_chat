@@ -1,0 +1,41 @@
+# Sygnal (https://github.com/matrix-org/sygnal) for Internal Chat: the push
+# gateway between Synapse and Apple/Google. Replace every <...>, and keep the
+# app IDs identical to the app's PUSH_APP_ID_IOS / PUSH_APP_ID_ANDROID.
+# See docs/push_notifications.md.
+
+http:
+  # Synapse posts to https://<gateway>/_matrix/push/v1/notify. Put Sygnal
+  # behind your TLS reverse proxy.
+  bind_addresses: ['127.0.0.1']
+  port: 5000
+
+apps:
+  # iOS release builds (TestFlight, App Store, enterprise): production APNs.
+  com.example.internalChat.ios:
+    type: apns
+    keyfile: /etc/sygnal/AuthKey_<KEY_ID>.p8
+    key_id: <KEY_ID>
+    team_id: <TEAM_ID>
+    # The iOS bundle ID.
+    topic: com.example.internalChat
+    platform: production
+    push_type: alert
+
+  # iOS debug and profile builds (installed from Xcode): APNs sandbox. The
+  # app adds ".dev" to its iOS app ID in those builds.
+  com.example.internalChat.ios.dev:
+    type: apns
+    keyfile: /etc/sygnal/AuthKey_<KEY_ID>.p8
+    key_id: <KEY_ID>
+    team_id: <TEAM_ID>
+    topic: com.example.internalChat
+    platform: sandbox
+    push_type: alert
+
+  # Android: Firebase Cloud Messaging, HTTP v1 API.
+  com.example.internal_chat.android:
+    type: gcm
+    api_version: v1
+    project_id: <FIREBASE_PROJECT_ID>
+    # A service-account key with the "Firebase Cloud Messaging API" role.
+    service_account_file: /etc/sygnal/firebase-service-account.json

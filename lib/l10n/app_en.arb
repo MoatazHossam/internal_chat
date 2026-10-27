@@ -258,5 +258,12 @@
   "errorLocalDataUnreadable": "This device's encrypted chat data can't be opened. Try again, or reset it to start fresh on this device.",
   "resetLocalData": "Reset local data",
   "resetLocalDataConfirmTitle": "Reset local data?",
-  "resetLocalDataConfirmBody": "This deletes this device's copy of your chats, its encryption keys and any messages not sent yet. You will need to sign in again. Messages on the server stay; earlier encrypted history comes back only with your recovery key or another verified device."
+  "resetLocalDataConfirmBody": "This deletes this device's copy of your chats, its encryption keys and any messages not sent yet. You will need to sign in again. Messages on the server stay; earlier encrypted history comes back only with your recovery key or another verified device.",
+  "pushNewMessage": "New message",
+  "notifications": "Notifications",
+  "notificationsOn": "On. The lock screen shows only “New message”, never the sender or the text.",
+  "notificationsNotConfigured": "Not set up in this build.",
+  "notificationsPending": "Setting up…",
+  "notificationsDenied": "Off. Allow notifications for Internal Chat in the system settings.",
+  "notificationsUnavailable": "Unavailable right now. Tap to try again."
 }

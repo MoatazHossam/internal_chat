@@ -29,6 +29,7 @@ Only `lib/data/matrix/` imports the SDK:
 | `matrix_mappers.dart` | `Room` → `Conversation`, `Timeline`/`Event` → `ChatMessage`, outbox entries → `ChatMessage` |
 | `matrix_errors.dart` | SDK and network exceptions → `ChatFailure` |
 | `matrix_verification.dart` | `KeyVerification` → domain `VerificationRequest` (emoji/SAS) |
+| `matrix_push.dart` | The Matrix pusher for push notifications (no SDK import; used by `registerPush`) |
 | `outbox/matrix_outbox_transport.dart` | Encrypts, uploads and sends outbox entries; classifies failures; searches history for delivered transaction IDs |
 
 The rest of `outbox/` has no SDK imports and is tested on its own:
@@ -67,6 +68,7 @@ it (conditional import), because it needs FFI; they get
 | History | `Timeline.requestHistory` when scrolling up |
 | Media limit | `getConfig()` → `m.upload.size`, checked before reading the file (skipped when the server cannot be reached; the upload then fails with "too large" if it is) |
 | Downloads | `downloadAndDecryptAttachment` (authenticated media), kept in memory |
+| Push | `postPusher` (`kind: http`, `format: event_id_only`, `append: false`) to the organization's gateway; generic "New message" only. See [`push_notifications.md`](push_notifications.md) |
 
 Reactions, edits and redactions still use the SDK's own send queue; they are
 not part of the outbox.
@@ -285,9 +287,9 @@ screen. Consequences, which the confirmation states:
 
 ## Test status (2026-10-27)
 
-### Automated tests: 92 passing
+### Automated tests: 107 passing
 
-`flutter test` runs 92 tests, all passing; `flutter analyze` reports no
+`flutter test` runs 107 tests, all passing; `flutter analyze` reports no
 issues and `dart format` reports no changes. They run on the development
 machine against fakes, in-memory SQLite and real SDK objects; **none of them
 talks to the server or runs on a simulator or phone.**
@@ -300,6 +302,7 @@ talks to the server or runs on a simulator or phone.**
 | Local store (`matrix_store_test.dart`) | 2 | Files without their key are never replaced automatically |
 | Mappers (`matrix_mappers_test.dart`) | 8 | Real SDK `Room`/`Event`/`Timeline` objects: receipts, edits, reactions, kinds, forwarded marker, outbox entries as pending / waiting / failed messages |
 | Controllers | 11 + 3 + 2 | Chat (including forwarding to several conversations and "send again" only after confirmation), sign-in, startup errors and local-data reset |
+| Push (`push_controller_test.dart`, `matrix_push_test.dart`) | 8 + 7 | When the app registers (sign-in, new token, language), the generic text, refused permission, missing token, server errors, notification taps; the pusher for iOS (production/sandbox) and Android; gateway-URL rules |
 | Other | 7 + 9 + 6 + 3 + 1 | Test fixture contract, Matrix error mapping, IDs, refuse-to-send guard, failure texts |
 
 ### On simulators
@@ -308,7 +311,8 @@ talks to the server or runs on a simulator or phone.**
 |---|---|
 | Sign-in with `moataz` and `kamel`, first sync, existing DM listed, session kept across a reinstall | Passed on iOS simulators (2026-10-20), before the outbox |
 | Installing the outbox build over an existing install keeps the session and history | Passed on two iOS simulators (2026-10-26) |
-| iOS simulator debug build | Passed (2026-10-26) with the outbox, before the redesign and the review fixes; not rebuilt since |
+| iOS simulator debug build | Passed (2026-10-27) with everything including push: the Swift push code compiles and the app carries the `aps-environment` entitlement. Not installed or run |
+| Android release APK (arm64) | Passed (2026-10-27) with everything including push: the Kotlin push code compiles and the manifest has the notification permission and the FCM service. Built **without** `google-services.json`; a build with Firebase applied is untested. Not installed or run |
 
 ### Not run yet (simulator or phone)
 
@@ -325,7 +329,10 @@ talks to the server or runs on a simulator or phone.**
 * The start-screen errors and *Reset local data*.
 * The redesigned interface on a device (it was checked only as rendered
   screenshots in a widget test).
-* Any Android build or Android device with the outbox. **Nothing has been
+* Push notifications on any device: there is no gateway or Apple/Firebase
+  account yet. The checklist is in
+  [`push_notifications.md`](push_notifications.md#test-status).
+* Any Android device or emulator with the outbox. **Nothing has been
   tested on a physical phone.**
 
 ## SDK spike checklist (handover section 7)
@@ -341,7 +348,7 @@ Run against the POC with a dedicated account
 | 4 | Verify from Element (emoji); set up recovery; restore on a second device | Implemented; to verify on device |
 | 5 | 25 MiB upload accepted, 25 MiB + 1 byte rejected cleanly; authenticated download | Implemented (limit read from the server); to verify on device |
 | 6 | Airplane mode, queue, reconnect, no duplicates | Outbox implemented and unit-tested (see [Test status](#test-status-2026-10-27)); not yet run on a simulator or phone |
-| 7 | iOS and Android builds including `flutter_vodozemac` on CI | iOS simulator build passes locally (last on 2026-10-26). An Android release APK (arm64) built before the outbox and started on an API 33 emulator; not rebuilt since. CI not set up yet |
+| 7 | iOS and Android builds including `flutter_vodozemac` on CI | iOS simulator build and Android release APK (arm64) build locally (both 2026-10-27). The APK was last started on an API 33 emulator before the outbox. CI not set up yet |
 | 8 | Licence decision recorded | Recorded as "accepted for POC, legal review pending" (README) |
 
 ## Known limitations
@@ -350,7 +357,9 @@ Run against the POC with a dedicated account
   use on-premises Active Directory with MFA; how it is connected to Matrix is
   not designed yet.
 * Web is not supported until a vodozemac WASM pipeline exists.
-* No push notifications (needs a push gateway; owner approval).
+* Push notifications are implemented in the app but do nothing until the
+  organization deploys the gateway (Sygnal; owner approval) and supplies the
+  Apple and Firebase accounts. The text is always a generic "New message".
 * No background sending: queued messages wait while the OS suspends the app.
 * Soft logout without a refresh token clears the session; the user signs in
   again as a new device and restores history with the recovery key.

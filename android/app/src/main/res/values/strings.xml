@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Used until the app has stored the text in its own language. -->
+    <string name="push_new_message">New message</string>
+    <string name="push_channel_messages">Messages</string>
+</resources>

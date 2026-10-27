@@ -5,6 +5,7 @@ import '../models/conversation.dart';
 import 'chat_failure.dart';
 import 'device_trust_state.dart';
 import 'ids.dart';
+import 'push.dart';
 import 'session_state.dart';
 
 // Backend contracts. Pure Dart: no SDK types appear here, so the Matrix SDK
@@ -152,12 +153,16 @@ abstract interface class DeviceTrust {
   Stream<VerificationRequest> get incomingVerifications;
 }
 
-/// One implementation of all four contracts (the Matrix adapter, or a test
-/// fixture). The
-/// composition root registers it under each interface; controllers depend
-/// only on the interface they need.
+/// One implementation of all the contracts (the Matrix adapter, or a test
+/// fixture). The composition root registers it under each interface;
+/// controllers depend only on the interface they need.
 abstract interface class ChatBackend
-    implements ChatSession, Conversations, Messages, DeviceTrust {}
+    implements
+        ChatSession,
+        Conversations,
+        Messages,
+        DeviceTrust,
+        PushRegistration {}
 
 class FileSource {
   const FileSource({required this.name, required this.bytes, this.mimeType});

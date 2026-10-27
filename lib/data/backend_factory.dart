@@ -7,4 +7,4 @@ import 'unsupported_platform_backend.dart'
 /// implementation behind the domain contracts. Pages and controllers never
 /// know which one they talk to.
 ChatBackend createChatBackend(AppConfiguration configuration) =>
-    createMatrixBackend(configuration.homeserver);
+    createMatrixBackend(configuration.homeserver, push: configuration.push);

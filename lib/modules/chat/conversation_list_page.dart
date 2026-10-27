@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../app_routes.dart';
 import '../../domain/device_trust_state.dart';
+import '../../domain/ids.dart';
 import '../../domain/session_state.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/conversation.dart';
@@ -11,6 +12,7 @@ import '../../styles/tokens.dart';
 import '../../utilities/message_labels.dart';
 import '../../widgets/avatar_widget.dart';
 import '../../widgets/failure_listener.dart';
+import '../push/push_controller.dart';
 import '../security/device_trust_controller.dart';
 import '../session/session_controller.dart';
 import 'chat_controller.dart';
@@ -42,7 +44,10 @@ class ConversationListPage extends GetView<ChatController> {
       ),
       body: FailureListener(
         failure: controller.failure,
-        child: _ConversationListBody(controller: controller),
+        child: _NotificationOpener(
+          controller: controller,
+          child: _ConversationListBody(controller: controller),
+        ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => showNewConversationSheet(context, controller),
@@ -152,6 +157,51 @@ class _ConversationListBodyState extends State<_ConversationListBody> {
       ],
     );
   }
+}
+
+/// Opens the conversation of a tapped notification. The list is the root
+/// page while signed in, so it is always there to do this.
+class _NotificationOpener extends StatefulWidget {
+  const _NotificationOpener({required this.controller, required this.child});
+
+  final ChatController controller;
+  final Widget child;
+
+  @override
+  State<_NotificationOpener> createState() => _NotificationOpenerState();
+}
+
+class _NotificationOpenerState extends State<_NotificationOpener> {
+  Worker? _worker;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!Get.isRegistered<PushController>()) return;
+    final push = Get.find<PushController>();
+    _worker = ever<String?>(push.openRequest, _open);
+    // A tap that started the app arrived before this page existed.
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _open(push.openRequest.value),
+    );
+  }
+
+  void _open(String? roomId) {
+    if (roomId == null || !mounted) return;
+    Get.find<PushController>().openRequest.value = null;
+    // Back to the list first: only one conversation is open at a time.
+    Get.until((route) => route.settings.name == AppRoutes.conversations);
+    openConversationPage(widget.controller, ConversationId(roomId));
+  }
+
+  @override
+  void dispose() {
+    _worker?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 /// Connection state and a prompt to verify this device.
