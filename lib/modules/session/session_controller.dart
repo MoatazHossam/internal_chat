@@ -21,6 +21,9 @@ class SessionController extends GetxController {
   /// app stays on the start screen instead of continuing without them.
   final startupFailure = Rxn<ChatFailure>();
 
+  /// True while unreadable local data is being deleted.
+  final resetting = false.obs;
+
   StreamSubscription<SessionState>? _subscription;
   bool _started = false;
 
@@ -45,6 +48,22 @@ class SessionController extends GetxController {
     } on ChatFailure catch (failure) {
       startupFailure.value = failure;
     }
+  }
+
+  /// Deletes local data that could not be opened, after the user confirmed,
+  /// and starts again signed out.
+  Future<void> resetLocalData() async {
+    if (resetting.value) return;
+    resetting.value = true;
+    try {
+      await _session.resetLocalData();
+    } on ChatFailure catch (failure) {
+      startupFailure.value = failure;
+      return;
+    } finally {
+      resetting.value = false;
+    }
+    await restore();
   }
 
   void _onState(SessionState next) {

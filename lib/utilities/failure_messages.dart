@@ -19,6 +19,7 @@ String failureMessage(AppLocalizations l10n, ChatFailure failure) =>
       NotEncryptedRoom() => l10n.errorNotEncryptedRoom,
       EncryptionUnavailable() => l10n.errorEncryptionUnavailable,
       SecureStorageUnavailable() => l10n.errorSecureStorageUnavailable,
+      LocalDataUnreadable() => l10n.errorLocalDataUnreadable,
       UnsupportedPlatform() => l10n.errorUnsupportedPlatform,
       Offline() => l10n.errorOffline,
       UserNotFound() => l10n.errorUserNotFound,

@@ -58,8 +58,17 @@ class _FakeTransport implements OutboxTransport {
   @override
   ({String userId, String deviceId})? account;
 
+  bool isOnline = true;
+
+  /// How often the worker checked the connection: a measure of how often
+  /// it woke up.
+  int wakeUps = 0;
+
   @override
-  bool online = true;
+  bool get online {
+    wakeUps++;
+    return isOnline;
+  }
 
   final plan = <_Step>[];
   final sent = <String>[];
@@ -276,14 +285,14 @@ void main() {
   );
 
   test('waits while offline and sends when the connection is back', () async {
-    transport.online = false;
+    transport.isOnline = false;
     final worker = newWorker(transport);
     await worker.start();
     await worker.enqueue(entry('t1'));
     await _settle();
     expect(transport.sent, isEmpty);
 
-    transport.online = true;
+    transport.isOnline = true;
     worker.networkRestored();
     await _settle();
 
@@ -466,7 +475,7 @@ void main() {
     });
 
     test('attachments survive in the store', () async {
-      transport.online = false;
+      transport.isOnline = false;
       final first = newWorker(transport);
       await first.start();
       await first.enqueue(
@@ -606,5 +615,37 @@ void main() {
     expect(first.inMilliseconds, inInclusiveRange(1600, 2400));
     final capped = retryDelay(30, random: random);
     expect(capped.inSeconds, inInclusiveRange(240, 360));
+  });
+
+  group('stays idle between attempts', () {
+    Future<int> wakeUpsDuring(Duration duration) async {
+      final before = transport.wakeUps;
+      await Future<void>.delayed(duration);
+      return transport.wakeUps - before;
+    }
+
+    test('while a message is being sent', () async {
+      transport.plan.add(const _Hang());
+      final worker = newWorker(transport);
+      await worker.start();
+      await worker.enqueue(entry('t1'));
+      await _settle();
+      expect(worker.isInFlight('t1'), isTrue);
+
+      expect(await wakeUpsDuring(const Duration(milliseconds: 100)), 0);
+    });
+
+    test('while later messages wait behind one that will be retried', () async {
+      transport.plan.add(const _Fail(OutboxSendError(SendErrorClass.network)));
+      final worker = newWorker(transport);
+      await worker.start();
+      await worker.enqueue(entry('a1'));
+      await worker.enqueue(entry('a2'));
+      await _settle();
+      expect(worker.entry('a1')?.lastError, SendErrorClass.network);
+
+      expect(await wakeUpsDuring(const Duration(milliseconds: 100)), 0);
+      expect(transport.sent, ['a1']);
+    });
   });
 }

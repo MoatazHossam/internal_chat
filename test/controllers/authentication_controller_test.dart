@@ -34,6 +34,9 @@ class FakeChatSession implements ChatSession {
 
   @override
   Future<void> signOut() async {}
+
+  @override
+  Future<void> resetLocalData() async {}
 }
 
 void main() {

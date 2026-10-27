@@ -32,29 +32,63 @@ class EncryptedStores {
   final Database outbox;
 }
 
+/// What to do about the database key at startup.
+enum DatabaseKeyPlan {
+  /// Open the databases with the stored key.
+  useStored,
+
+  /// First start (or after a reset): create a key; there is nothing to lose.
+  createNew,
+
+  /// Data files exist but their key is gone. They can never be read again,
+  /// but deleting them is the user's decision, not the app's.
+  refuse,
+}
+
+DatabaseKeyPlan planDatabaseKey({
+  required bool keyStored,
+  required bool filesExist,
+}) => keyStored
+    ? DatabaseKeyPlan.useStored
+    : filesExist
+    ? DatabaseKeyPlan.refuse
+    : DatabaseKeyPlan.createNew;
+
 /// Opens both local databases.
 ///
-/// Fails closed: if the key cannot be read from platform secure storage, or
-/// SQLCipher is not linked, or a database does not open with the stored
-/// key, this throws [SecureStorageUnavailable]. It never falls back to a
-/// plaintext database and never deletes a database the stored key might
-/// still open. Files are only removed when the key itself is gone (for
-/// example not restored with a device backup): without it they can never be
-/// read again.
+/// Fails closed and never deletes anything:
+/// * the key cannot be read from platform secure storage, or SQLCipher is
+///   not linked: [SecureStorageUnavailable] (retrying may help);
+/// * the files exist but the key is missing, or the stored key does not
+///   open them: [LocalDataUnreadable]. Only the user can then choose to
+///   reset local data ([deleteEncryptedStores]).
+///
+/// It never falls back to a plaintext database.
 Future<EncryptedStores> openEncryptedStores(String name) async {
-  final ({String value, bool created}) key;
   final String sdkPath;
   final String outboxPath;
+  String? key;
+  final bool filesExist;
   try {
     sdkPath = await _databasePath(name);
     outboxPath = await _databasePath(_outboxName(name));
-    key = await _databaseKey();
-    if (key.created) {
-      await _deleteFiles(sdkPath);
-      await _deleteFiles(outboxPath);
-    }
+    key = await _secureStorage.read(key: _databaseKeyName);
+    filesExist = await _filesExist(sdkPath) || await _filesExist(outboxPath);
   } catch (_) {
     throw const SecureStorageUnavailable();
+  }
+
+  switch (planDatabaseKey(keyStored: key != null, filesExist: filesExist)) {
+    case DatabaseKeyPlan.refuse:
+      throw const LocalDataUnreadable();
+    case DatabaseKeyPlan.createNew:
+      try {
+        key = await _createDatabaseKey();
+      } catch (_) {
+        throw const SecureStorageUnavailable();
+      }
+    case DatabaseKeyPlan.useStored:
+      break;
   }
 
   final factory = createDatabaseFactoryFfi();
@@ -63,23 +97,30 @@ Future<EncryptedStores> openEncryptedStores(String name) async {
     sdkDatabase = await _openEncrypted(
       factory,
       sdkPath,
-      key.value,
+      key!,
       migratePlaintext: true,
     );
-    final outbox = await _openEncrypted(factory, outboxPath, key.value);
+    final outbox = await _openEncrypted(factory, outboxPath, key);
     // No `fileStorageLocation`: with one, the SDK writes decrypted
     // attachments to plain files. Without it, media is never cached on disk.
     final sdk = await MatrixSdkDatabase.init(name, database: sdkDatabase);
     return EncryptedStores(sdk: sdk, outbox: outbox);
-  } catch (_) {
-    // Includes the StateError thrown when the bundled SQLite is not
-    // SQLCipher, and "file is not a database" for a wrong key.
-    try {
-      await sdkDatabase?.close();
-    } catch (_) {
-      // Already failing; closing is best effort.
-    }
+  } on StateError {
+    // Thrown by applyPragmaKey when the bundled SQLite is not SQLCipher.
+    await _closeQuietly(sdkDatabase);
     throw const SecureStorageUnavailable();
+  } catch (_) {
+    // For example "file is not a database": the key does not open it.
+    await _closeQuietly(sdkDatabase);
+    throw const LocalDataUnreadable();
+  }
+}
+
+Future<void> _closeQuietly(Database? database) async {
+  try {
+    await database?.close();
+  } catch (_) {
+    // Already failing; closing is best effort.
   }
 }
 
@@ -109,8 +150,8 @@ Future<Database> _openEncrypted(
   return database;
 }
 
-/// Deletes both databases and their key after the user signs out. The
-/// databases must already be closed.
+/// Deletes both databases and their key: after the user signs out, or when
+/// the user resets unreadable local data. The databases must be closed.
 Future<void> deleteEncryptedStores(String name) async {
   await _deleteFiles(await _databasePath(name));
   await _deleteFiles(await _databasePath(_outboxName(name)));
@@ -126,10 +167,14 @@ Future<void> _deleteFiles(String path) async {
   }
 }
 
-Future<({String value, bool created})> _databaseKey() async {
-  final existing = await _secureStorage.read(key: _databaseKeyName);
-  if (existing != null) return (value: existing, created: false);
+Future<bool> _filesExist(String path) async {
+  for (final suffix in const ['', '-wal', '-shm', '-journal']) {
+    if (await File('$path$suffix').exists()) return true;
+  }
+  return false;
+}
 
+Future<String> _createDatabaseKey() async {
   final random = Random.secure();
   final bytes = Uint8List.fromList(
     List<int>.generate(32, (_) => random.nextInt(256)),
@@ -141,7 +186,7 @@ Future<({String value, bool created})> _databaseKey() async {
   // launch could not open the database.
   final stored = await _secureStorage.read(key: _databaseKeyName);
   if (stored != created) throw const SecureStorageUnavailable();
-  return (value: created, created: true);
+  return created;
 }
 
 Future<String> _databasePath(String name) async {

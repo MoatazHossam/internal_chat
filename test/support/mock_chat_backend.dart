@@ -85,6 +85,9 @@ final class MockChatBackend implements ChatBackend {
   }
 
   @override
+  Future<void> resetLocalData() async {}
+
+  @override
   Future<void> signOut() async {
     _replyTimer?.cancel();
     _setTrust(TrustState.unknown);

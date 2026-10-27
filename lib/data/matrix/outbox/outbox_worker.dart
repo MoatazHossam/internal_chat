@@ -478,8 +478,16 @@ class OutboxWorker {
     if (!_running) return;
     final now = _clock();
     DateTime? earliest;
+    final rooms = <String>{};
     for (final entry in _entries) {
       if (entry.state != OutboxState.queued) continue;
+      // Only the oldest queued message of a room can go next; the ones
+      // behind it wait for it. A room that is being sent reschedules when
+      // its turn ends, so its messages (including the one in flight, which
+      // is still due) must not wake the timer now.
+      if (!rooms.add(entry.roomId) || _draining.contains(entry.roomId)) {
+        continue;
+      }
       final at = entry.nextAttemptAt ?? now;
       if (earliest == null || at.isBefore(earliest)) earliest = at;
     }

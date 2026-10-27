@@ -254,5 +254,9 @@
   "sendFailedServer": "Not sent: the server did not accept it after several tries.",
   "sendFailedUncertain": "It is not certain whether this message arrived. It may have been sent before the connection or the session was lost.",
   "sendFailedNotResendable": "Not sent. This attachment can't be resent; please send it again.",
-  "errorDeliveryUncertain": "This message may already have arrived."
+  "errorDeliveryUncertain": "This message may already have arrived.",
+  "errorLocalDataUnreadable": "This device's encrypted chat data can't be opened. Try again, or reset it to start fresh on this device.",
+  "resetLocalData": "Reset local data",
+  "resetLocalDataConfirmTitle": "Reset local data?",
+  "resetLocalDataConfirmBody": "This deletes this device's copy of your chats, its encryption keys and any messages not sent yet. You will need to sign in again. Messages on the server stay; earlier encrypted history comes back only with your recovery key or another verified device."
 }

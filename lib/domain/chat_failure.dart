@@ -57,6 +57,13 @@ final class SecureStorageUnavailable extends ChatFailure {
   const SecureStorageUnavailable();
 }
 
+/// The local encrypted store exists but cannot be opened: its key is gone
+/// (for example files restored without the device's Keychain) or does not
+/// open it. Nothing is deleted automatically; the user may reset local data.
+final class LocalDataUnreadable extends ChatFailure {
+  const LocalDataUnreadable();
+}
+
 /// This platform cannot run the encrypted backend yet (web).
 final class UnsupportedPlatform extends ChatFailure {
   const UnsupportedPlatform();

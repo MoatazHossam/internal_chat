@@ -123,6 +123,19 @@ final class MatrixChatBackend implements ChatBackend {
   Future<void> signOut() =>
       _signingOut ??= _signOut().whenComplete(() => _signingOut = null);
 
+  @override
+  Future<void> resetLocalData() async {
+    // Only for a store that could not be opened: an open client means the
+    // data is readable, and signing out is the way to remove it.
+    if (_client != null || _opening != null) throw const NotAvailable();
+    try {
+      await deleteEncryptedStores(clientName);
+    } catch (_) {
+      throw const SecureStorageUnavailable();
+    }
+    await deleteTemporaryMedia();
+  }
+
   Future<void> _signOut() async {
     final client = _client;
     if (client != null) {

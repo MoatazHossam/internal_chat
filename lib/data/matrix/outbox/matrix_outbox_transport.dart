@@ -90,39 +90,34 @@ final class MatrixOutboxTransport implements OutboxTransport {
 
     final since = entry.firstAttemptAt;
     if (since == null) return false;
-    // Allows for clock differences between this device and the server.
-    final searchUntil = since.subtract(const Duration(minutes: 10));
     final filter = jsonEncode({
       'senders': [entry.userId],
     });
-    String? from;
     try {
-      for (var page = 0; page < _maxHistoryPages; page++) {
-        final response = await _client
-            .getRoomEvents(
-              entry.roomId,
-              Direction.b,
-              from: from,
-              limit: 100,
-              filter: filter,
-            )
-            .timeout(_sendTimeout);
-        for (final event in response.chunk) {
-          if (_isDelivered(event.toJson(), entry)) return true;
-        }
-        final oldest = response.chunk.lastOrNull;
-        if (oldest == null ||
-            response.end == null ||
-            oldest.originServerTs.isBefore(searchUntil)) {
-          return false;
-        }
-        from = response.end;
-      }
+      return await searchHistory(
+        fetchPage: (from) async {
+          final response = await _client
+              .getRoomEvents(
+                entry.roomId,
+                Direction.b,
+                from: from,
+                limit: 100,
+                filter: filter,
+              )
+              .timeout(_sendTimeout);
+          return (
+            events: [for (final event in response.chunk) event.toJson()],
+            end: response.end,
+          );
+        },
+        isTarget: (event) => _isDelivered(event, entry),
+        // Allows for clock differences between this device and the server.
+        until: since.subtract(const Duration(minutes: 10)),
+        maxPages: _maxHistoryPages,
+      );
     } catch (error) {
       throw classifySendError(error);
     }
-    // Searched as far as allowed without reaching the first attempt.
-    return null;
   }
 
   bool _isDelivered(Map<String, Object?> event, OutboxEntry entry) {
@@ -335,6 +330,40 @@ final class MatrixOutboxTransport implements OutboxTransport {
     );
     await _client.database.transaction(() => _client.handleSync(update));
   }
+}
+
+/// One page of `/messages`, newest event first.
+typedef HistoryPage = ({List<Map<String, Object?>> events, String? end});
+
+/// Pages backwards through a room's history looking for [isTarget].
+///
+/// Returns true when found, false once the history before [until] (or the
+/// start of the room) was searched without finding it, and null when that
+/// could not be established within [maxPages]. A page may be empty while
+/// more history exists (especially with a filter): only a missing `end`
+/// token means the start was reached, as the Matrix spec says.
+Future<bool?> searchHistory({
+  required Future<HistoryPage> Function(String? from) fetchPage,
+  required bool Function(Map<String, Object?> event) isTarget,
+  required DateTime until,
+  int maxPages = 20,
+}) async {
+  String? from;
+  for (var page = 0; page < maxPages; page++) {
+    final result = await fetchPage(from);
+    if (result.events.any(isTarget)) return true;
+    final end = result.end;
+    if (end == null) return false;
+    final oldest = result.events.lastOrNull?['origin_server_ts'];
+    if (oldest is int &&
+        DateTime.fromMillisecondsSinceEpoch(oldest).isBefore(until)) {
+      return false;
+    }
+    // The server did not move on: give up rather than loop.
+    if (end == from) return null;
+    from = end;
+  }
+  return null;
 }
 
 /// Sorts what the SDK or the network threw into a [SendErrorClass]. Only the

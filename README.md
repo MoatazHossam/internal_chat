@@ -63,7 +63,7 @@ This conflicts with the "Proprietary" statement in the [License](#license) secti
 |---|---|
 | Homeserver | `https://secure-chat-poc.duckdns.org`, discovered through `/.well-known/matrix/client` |
 | Software | Synapse 1.163; Matrix spec v1.1–v1.15 |
-| Sign-in | `m.login.password` only. No SSO, OIDC, MFA, or registration; an administrator creates accounts |
+| Sign-in | **POC authentication:** `m.login.password` only, no SSO, OIDC, MFA or registration; an administrator creates accounts. Production will use on-premises Active Directory with MFA |
 | Sync | Classic `/v3/sync` long-polling |
 | Rooms | Encrypted by default (Megolm), invite-only, no public directory |
 | Federation | Disabled |
@@ -87,7 +87,8 @@ Implemented on the Matrix backend:
 * Read receipts and unread counts
 * Typing indicators
 * In-conversation message search (loaded messages)
-* Offline sending with idempotent retry
+* Offline sending through a persistent encrypted outbox (text, images, files, voice notes), retried automatically without duplicates
+* Forwarding text, images, files and voice notes to one or more conversations
 * Device verification (emoji/SAS), recovery key, and online key backup
 
 Not available or not applicable:
@@ -237,12 +238,12 @@ The server encrypts new rooms by default but **does not enforce encryption**. Th
 1. Creates every room with an explicit `m.room.encryption` (`m.megolm.v1.aes-sha2`) in `initial_state`, and never reuses an old unencrypted DM.
 2. **Refuses to send** (messages, files, voice notes, reactions, edits) into any room that is not encrypted, or when encryption is not running on the device. The composer is replaced by an explanation; there is no plaintext fallback.
 3. Treats room names and topics as server-visible and tells users to keep group names generic.
-4. Stores the local database encrypted with SQLCipher. The key lives in Keychain/Keystore. If either is unavailable, the app stops at the start screen instead of falling back to plaintext.
+4. Stores the local databases (the SDK store and the outbox of unsent messages) encrypted with SQLCipher. The key lives in Keychain/Keystore. If either is unavailable, or the databases cannot be opened, the app stops at the start screen instead of falling back to plaintext, and never deletes the data on its own (see [Local Data Security](#local-data-security)).
 5. Never logs access tokens, message bodies, or keys (SDK log level is `error`).
 
 ## Sign-in and Sessions
 
-* Password sign-in only (`m.login.password`). The app offers no sign-up.
+* **POC authentication:** password sign-in only (`m.login.password`). Production will use on-premises Active Directory with MFA; how it connects to Matrix is not designed yet. The app offers no sign-up.
 * Each sign-in creates a new device with its own encryption keys.
 * The app requests refresh tokens; the SDK renews access tokens automatically.
 * If the server ends the session (`M_UNKNOWN_TOKEN`), the user returns to the login screen with an explanation.
@@ -264,11 +265,16 @@ This changes the original requirement and needs an organizational decision (see 
 
 ## Offline Messaging and Deduplication
 
-* Every send creates one `LocalMessageId` per user action. The adapter uses it as the Matrix transaction ID (`PUT /rooms/{roomId}/send/{type}/{txnId}`), so every retry reuses it and the server returns the same event instead of a duplicate.
-* Pending messages are kept as local echoes in the SDK's encrypted store and shown as "sending" until the server accepts them.
-* While offline the SDK keeps retrying for two minutes; after that the message is marked failed. When the connection returns, failed messages in open conversations are retried automatically (once per app run); any failed message can be retried by tapping it.
-* A queued message is never shown as accepted by the server.
-* Failed **attachments** cannot be retried, because decrypted files are not kept on disk; the user picks the file again.
+Details, retry rules and test status: [`docs/matrix_integration.md`](docs/matrix_integration.md#offline-sending-outbox).
+
+* **Persistent encrypted outbox.** Text, images, files, voice notes and forwards are stored before the first attempt in a separate SQLCipher database (same key as the SDK store), attachment bytes included. The queue survives restarts, belongs to one account, and is deleted with the user's data at sign-out.
+* **One sender for the whole app.** It sends for every conversation, open or not, in order within each conversation, and resumes on app start, sign-in and reconnect.
+* **No duplicates within the server's window.** Every send creates one `LocalMessageId` per user action. It is the Matrix transaction ID (`PUT /rooms/{roomId}/send/{type}/{txnId}`) on every retry from the same device, so a repeat returns the same event. If sync shows that an attempt arrived although its response was lost, the message is not sent again.
+* **Retries by cause.** Connection loss and server errors back off (2 s up to 5 min, with jitter), `429` waits `retry_after_ms` for all conversations, and an expired token is refreshed through the SDK's shared refresh before the same message is retried. Permanent errors (not allowed, too large, not encrypted) stop with a reason.
+* **Accurate states.** Sending, waiting for network, sent (only once the server returned the event ID), read, and failed with a reason and *Retry* or *Delete*. A message is never shown as sent before the server accepted it.
+* **Uncertain delivery is never resent blindly.** The server deduplicates for 24 hours and only per device. After about 23 hours the app first searches the room's history for the message's transaction ID. A message attempted on another device (before a new sign-in) cannot be checked. When it cannot be established whether a message arrived, the message stops as *uncertain*: *Send again* asks for confirmation, because it may show twice.
+* **Forwarding** sends a new encrypted message to each chosen conversation, with its own ID. Text keeps only its body (no reply or edit relation); images, files and voice notes reuse the original encrypted file and key, so nothing is uploaded again. Copies show "Forwarded" (a UI-only marker).
+* **Not covered:** nothing is sent while the OS suspends the app (no background sending).
 
 ## Push Notifications (needs new infrastructure)
 
@@ -339,11 +345,24 @@ MDM improves device control but does not replace application security.
 
 ## Local Data Security
 
-* The SDK store (messages, room keys, device keys, sync cursor, access token) is an SQLCipher database. Its 256-bit key is generated on the device and stored with `flutter_secure_storage` (Keychain `first_unlock_this_device`; Android Keystore).
+* Two SQLCipher databases: the SDK store (messages, room keys, device keys, sync cursor, access token) and the outbox (unsent messages, their attachments and attachment keys). Their 256-bit key is generated on the device and stored with `flutter_secure_storage` (Keychain `first_unlock_this_device`; Android Keystore).
 * Decrypted attachments are held in memory only. The SDK's file cache is disabled because it writes decrypted files to disk.
-* Voice notes are written to a temporary file for playback and deleted when the player closes. Recordings and files chosen with the picker are deleted after they are read.
+* Plaintext media that must exist as a file for a moment (a recording until it is read, a decrypted voice note while it plays) lives in one temporary directory. It is deleted when the player closes, and the whole directory and the file picker's copies are deleted at every app start and at sign-out.
 * Android backups and device-to-device transfer are disabled for app data.
-* Sign-out deletes the database files and the key.
+* Sign-out deletes both databases, the key and temporary media.
+
+### Startup errors and resetting local data
+
+Opening the databases never deletes them automatically:
+
+* If Keychain/Keystore cannot be read (for example before the first unlock after a restart) or SQLCipher is missing, the start screen offers *Retry* only.
+* If the database files exist but their key is missing (for example files restored from a backup without this device's Keychain), or the stored key does not open them, the start screen explains that local data cannot be opened and offers *Retry* and *Reset local data*. No new key is created.
+
+*Reset local data* runs only after the user confirms. It deletes both databases, the key and temporary media, and returns to sign-in. Consequences:
+
+* This device's copy of the chats, its encryption keys and any **messages not sent yet** are lost.
+* Signing in again creates a new device. Messages on the server remain; earlier encrypted history comes back only with the recovery key or verification from another device.
+* **The old device remains registered on the server**, because the app no longer has its access token to sign it out. Remove it from another session (for example Element's session list) or ask an administrator.
 
 ## Attachment Security
 
@@ -458,15 +477,21 @@ If a tool is unavailable, report that clearly. Never claim a check passed when i
 
 ## Testing Strategy
 
-The project includes:
+Full breakdown and dates: [`docs/matrix_integration.md`](docs/matrix_integration.md#test-status-2026-10-27).
 
-* Domain tests (user-ID parsing, the refuse-to-send guard)
-* Error-mapping tests (Matrix error codes → `ChatFailure`)
-* Mapper tests against real SDK `Room`/`Event`/`Timeline` objects (read receipts, edits, reactions, undecryptable events, local echoes)
-* Contract tests on the in-memory test fixture (idempotent send, unencrypted rooms, upload limit, invites)
-* Controller tests through the domain contracts
+**Automated (run on 2026-10-27): 92 tests, all passing**, plus `flutter analyze` (no issues) and `dart format` (no changes). They run on the development machine against fakes, in-memory SQLite and real SDK objects. None of them talks to the server or runs on a simulator or phone.
 
-Still needed against the POC server (the SDK spike in `docs/matrix_integration.md`): sign-in, DM with Element, verification and recovery across devices, media limits, offline send, and CI builds.
+* Outbox worker against a fake server that deduplicates per device and transaction ID: retries, lost responses, offline and reconnect, token refresh, rate limits, ordering, restarts, new devices, the 23-hour window, and an idle timer while sending
+* History search (empty intermediate pages, end of history, cutoff, page budget)
+* Outbox storage, error classification and forwarded content
+* Local store: data without its key is never replaced automatically
+* Mapper tests against real SDK `Room`/`Event`/`Timeline` objects (read receipts, edits, reactions, forwarded marker, unsent messages)
+* Controller tests through the domain contracts (chat, forwarding, "send again" confirmation, sign-in, startup errors and reset)
+* Domain, error-mapping, failure-text and test-fixture contract tests
+
+**On simulators:** sign-in, sync and session restore passed on iOS simulators (2026-10-20); installing the outbox build over an existing install kept the session and history (2026-10-26).
+
+**Not tested yet on a simulator or phone:** offline sending and reconnecting after more than five minutes, leaving the conversation while sending, restarting with queued messages, attachment retries, duplicate prevention against the real server, forwarding between real clients (Flutter and Element), voice-note recording, the start-screen reset, the redesigned interface, and anything on Android. **Nothing has been tested on a physical phone.**
 
 ## Definition of Done
 
@@ -599,7 +624,7 @@ Recommended next step:
 * Matrix SDK adapter behind domain contracts
 * Direct and group messaging with end-to-end encryption
 * Device verification, recovery key, and key backup
-* Offline sending with idempotent retry
+* Offline sending through a persistent encrypted outbox, and forwarding
 * Encrypted local storage
 * Attachments
 * Push notifications (needs a push gateway)
@@ -629,7 +654,7 @@ The following remain unresolved:
 * Certificate pinning or enterprise-CA strategy
 * Final MDM compliance policy
 * Device retention and VIP deletion
-* AD/MFA or SSO in front of Matrix
+* How on-premises Active Directory with MFA (the production sign-in) is connected to Matrix
 * Production server naming
 * Expected user, conversation, message, and attachment scale
 

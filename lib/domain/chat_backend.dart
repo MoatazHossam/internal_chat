@@ -26,6 +26,12 @@ abstract interface class ChatSession {
 
   /// Signs out this device and deletes its local data.
   Future<void> signOut();
+
+  /// Deletes this device's local store after it could not be opened
+  /// ([LocalDataUnreadable]). Only on the user's explicit request: it removes
+  /// unsent messages and this device's keys. The server still lists the old
+  /// device until it is removed from another session.
+  Future<void> resetLocalData();
 }
 
 abstract interface class Conversations {

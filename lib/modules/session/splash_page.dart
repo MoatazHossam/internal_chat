@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../../domain/chat_failure.dart';
 import '../../l10n/app_localizations.dart';
 import '../../styles/tokens.dart';
 import '../../utilities/failure_messages.dart';
@@ -46,16 +47,32 @@ class SplashPage extends GetView<SessionController> {
                       size: 40,
                       color: Theme.of(context).colorScheme.error,
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: Insets.md),
                     Text(
                       failureMessage(l10n, failure),
                       textAlign: TextAlign.center,
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: Insets.lg),
                     FilledButton(
-                      onPressed: controller.restore,
+                      onPressed: controller.resetting.value
+                          ? null
+                          : controller.restore,
                       child: Text(l10n.retry),
                     ),
+                    // Deleting local data is never automatic: only offered
+                    // when the store exists but cannot be opened.
+                    if (failure is LocalDataUnreadable) ...[
+                      const SizedBox(height: Insets.sm),
+                      TextButton(
+                        style: TextButton.styleFrom(
+                          foregroundColor: Theme.of(context).colorScheme.error,
+                        ),
+                        onPressed: controller.resetting.value
+                            ? null
+                            : () => _confirmReset(context, l10n),
+                        child: Text(l10n.resetLocalData),
+                      ),
+                    ],
                   ],
                 ],
               );
@@ -64,5 +81,33 @@ class SplashPage extends GetView<SessionController> {
         ),
       ),
     );
+  }
+
+  Future<void> _confirmReset(
+    BuildContext context,
+    AppLocalizations l10n,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l10n.resetLocalDataConfirmTitle),
+        content: Text(l10n.resetLocalDataConfirmBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(l10n.cancel),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+              foregroundColor: Theme.of(dialogContext).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(l10n.resetLocalData),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await controller.resetLocalData();
   }
 }
